@@ -138,13 +138,32 @@ Accuracy is **not implemented**, deliberately: a constant-negative model scores
 1000h. PR-AUC is average precision, not trapezoidal area — the two differ and only
 one is intended. The decision threshold has no default; it is always explicit.
 
+## Cross-validation
+
+Repeated stratified k-fold (5×5 by default). A single 80/20 split would leave ~68
+positives in test, where differences between models are indistinguishable from
+resampling noise.
+
+Estimators are supplied as a **factory** — a callable returning a fresh, unfitted
+object — rather than an instance. Passing an instance invites reuse across folds,
+where a fitted scaler or warm-started ensemble carries test-fold information
+forward. Leakage raises nothing and produces ~0.99 scores that look like success,
+so the harness prevents it structurally and is tested against a known-answer case:
+an unlimited-depth tree on random labels must score at the base rate, and does.
+
+`compare()` implements the falsification rule — challenger beats baseline by more
+than the CV spread. One caveat that belongs in the write-up: repeated k-fold folds
+reuse rows, so the standard deviation across fits is a descriptive spread, not a
+standard error. Treat the rule as a decision procedure, not a significance test.
+
 ## Status
 
-EDA complete; evaluation harness in progress. No models trained yet.
+EDA complete. Evaluation harness complete: metrics, cross-validation, and the
+model-comparison rule. No models trained yet.
 
-59 tests cover the config guards, the four loader corruption paths (against
-synthetic fixtures, not the real data), and every metric against hand-computed
-values.
+81 tests cover the config guards, the loader corruption paths (against synthetic
+fixtures, not the real data), every metric against hand-computed values, and the
+cross-validation leakage guarantees.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
 Rationale for each decision is in `docs/DECISIONS.md`.
