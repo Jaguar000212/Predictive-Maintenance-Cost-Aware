@@ -1,0 +1,369 @@
+{
+  "config": {
+    "ai4i": {
+      "categorical_features": [
+        "type"
+      ],
+      "column_pairs": [
+        [
+          "UDI",
+          "udi"
+        ],
+        [
+          "Product ID",
+          "product_id"
+        ],
+        [
+          "Type",
+          "type"
+        ],
+        [
+          "Air temperature [K]",
+          "air_temp_k"
+        ],
+        [
+          "Process temperature [K]",
+          "process_temp_k"
+        ],
+        [
+          "Rotational speed [rpm]",
+          "rot_speed_rpm"
+        ],
+        [
+          "Torque [Nm]",
+          "torque_nm"
+        ],
+        [
+          "Tool wear [min]",
+          "tool_wear_min"
+        ],
+        [
+          "Machine failure",
+          "machine_failure"
+        ],
+        [
+          "TWF",
+          "TWF"
+        ],
+        [
+          "HDF",
+          "HDF"
+        ],
+        [
+          "PWF",
+          "PWF"
+        ],
+        [
+          "OSF",
+          "OSF"
+        ],
+        [
+          "RNF",
+          "RNF"
+        ]
+      ],
+      "encoding": "utf-8-sig",
+      "expected_rows": 10000,
+      "identifier_columns": [
+        "udi",
+        "product_id"
+      ],
+      "mode_flags": [
+        "TWF",
+        "HDF",
+        "PWF",
+        "OSF",
+        "RNF"
+      ],
+      "numeric_features": [
+        "air_temp_k",
+        "process_temp_k",
+        "rot_speed_rpm",
+        "torque_nm",
+        "tool_wear_min"
+      ],
+      "target": "machine_failure"
+    },
+    "cmapss": {
+      "expected_test_units": 100,
+      "expected_train_units": 100,
+      "n_op_settings": 3,
+      "n_sensors": 21,
+      "subset": "FD001"
+    },
+    "cost": {
+      "false_alarm": null,
+      "horizon_hours": 1000.0,
+      "inspection": null,
+      "missed_failure": null
+    },
+    "cv": {
+      "n_repeats": 5,
+      "n_splits": 5,
+      "random_state": 42,
+      "shuffle": true
+    },
+    "determinism": {
+      "deterministic": [
+        "HDF",
+        "PWF",
+        "OSF"
+      ],
+      "semi_deterministic": [
+        "TWF"
+      ],
+      "stochastic": [
+        "RNF"
+      ]
+    },
+    "eda": {
+      "constant_detection": "nunique",
+      "constant_std_tolerance": 1e-12,
+      "variance_preview_rows": 12
+    },
+    "estimator": "dummy_constant_negative",
+    "metrics": {
+      "beta": 2.0,
+      "report_threshold": 0.5,
+      "thresholds": [
+        0.01,
+        0.02,
+        0.03,
+        0.04,
+        0.05,
+        0.06,
+        0.07,
+        0.08,
+        0.09,
+        0.1,
+        0.11,
+        0.12,
+        0.13,
+        0.14,
+        0.15,
+        0.16,
+        0.17,
+        0.18,
+        0.19,
+        0.2,
+        0.21,
+        0.22,
+        0.23,
+        0.24,
+        0.25,
+        0.26,
+        0.27,
+        0.28,
+        0.29,
+        0.3,
+        0.31,
+        0.32,
+        0.33,
+        0.34,
+        0.35,
+        0.36,
+        0.37,
+        0.38,
+        0.39,
+        0.4,
+        0.41,
+        0.42,
+        0.43,
+        0.44,
+        0.45,
+        0.46,
+        0.47,
+        0.48,
+        0.49,
+        0.5,
+        0.51,
+        0.52,
+        0.53,
+        0.54,
+        0.55,
+        0.56,
+        0.57,
+        0.58,
+        0.59,
+        0.6,
+        0.61,
+        0.62,
+        0.63,
+        0.64,
+        0.65,
+        0.66,
+        0.67,
+        0.68,
+        0.69,
+        0.7,
+        0.71,
+        0.72,
+        0.73,
+        0.74,
+        0.75,
+        0.76,
+        0.77,
+        0.78,
+        0.79,
+        0.8,
+        0.81,
+        0.82,
+        0.83,
+        0.84,
+        0.85,
+        0.86,
+        0.87,
+        0.88,
+        0.89,
+        0.9,
+        0.91,
+        0.92,
+        0.93,
+        0.94,
+        0.95,
+        0.96,
+        0.97,
+        0.98,
+        0.99
+      ]
+    },
+    "name": "dummy_constant_negative",
+    "paths": {
+      "data_raw": "D:\\AI\\Predictive-Maintenance-Cost-Aware\\data\\raw",
+      "repo_root": "D:\\AI\\Predictive-Maintenance-Cost-Aware",
+      "reports_dir": "D:\\AI\\Predictive-Maintenance-Cost-Aware\\reports",
+      "results_dir": "D:\\AI\\Predictive-Maintenance-Cost-Aware\\results"
+    },
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "created_utc": "2026-08-15T02:02:59+00:00",
+  "environment": {
+    "numpy": "2.4.6",
+    "pandas": "2.3.3",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.15",
+    "scipy": "1.17.1",
+    "sklearn": "1.9.0"
+  },
+  "git": {
+    "branch": "main",
+    "dirty": false,
+    "sha": "781395dabe7ed4f2e478db47ff66bf4134e6527d"
+  },
+  "metrics": {
+    "cv": {
+      "n_repeats": 5,
+      "n_splits": 5,
+      "random_state": 42,
+      "shuffle": true
+    },
+    "estimator": "dummy_constant_negative",
+    "metrics": {
+      "beta": 2.0,
+      "report_threshold": 0.5
+    },
+    "n_fits": 25,
+    "summary": {
+      "base_rate": {
+        "max": 0.034,
+        "mean": 0.033900000000000007,
+        "min": 0.0335,
+        "std": 0.00020412414523193168
+      },
+      "beta": {
+        "max": 2.0,
+        "mean": 2.0,
+        "min": 2.0,
+        "std": 0.0
+      },
+      "brier": {
+        "max": 0.034,
+        "mean": 0.033900000000000007,
+        "min": 0.0335,
+        "std": 0.00020412414523193168
+      },
+      "f2": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "std": 0.0
+      },
+      "fn": {
+        "max": 68.0,
+        "mean": 67.8,
+        "min": 67.0,
+        "std": 0.408248290463863
+      },
+      "fp": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "std": 0.0
+      },
+      "n": {
+        "max": 2000.0,
+        "mean": 2000.0,
+        "min": 2000.0,
+        "std": 0.0
+      },
+      "n_positive": {
+        "max": 68.0,
+        "mean": 67.8,
+        "min": 67.0,
+        "std": 0.408248290463863
+      },
+      "pr_auc": {
+        "max": 0.034,
+        "mean": 0.033900000000000007,
+        "min": 0.0335,
+        "std": 0.00020412414523193168
+      },
+      "precision": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "std": 0.0
+      },
+      "recall": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "std": 0.0
+      },
+      "threshold": {
+        "max": 0.5,
+        "mean": 0.5,
+        "min": 0.5,
+        "std": 0.0
+      },
+      "tn": {
+        "max": 1933.0,
+        "mean": 1932.2,
+        "min": 1932.0,
+        "std": 0.4082482904638631
+      },
+      "tp": {
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "std": 0.0
+      }
+    }
+  },
+  "name": "dummy_constant_negative",
+  "notes": "",
+  "reproducible": true,
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ]
+}
