@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 from sklearn.metrics import auc, precision_recall_curve
 
+from pdm.config import MetricConfig
 from pdm.eval import metrics as M
 
 
@@ -183,3 +184,51 @@ def test_accuracy_is_not_implemented():
     assert not hasattr(M, "accuracy")
     assert "accuracy" not in M.METRIC_NAMES
     assert "accuracy" not in M.classification_metrics([0, 1], [0.1, 0.9], threshold=0.5)
+
+
+# ---------------------------------------------------------------------------
+# MetricSuite: the configurable wrapper over the pure functions
+# ---------------------------------------------------------------------------
+def test_suite_uses_the_configured_report_threshold():
+    """No hidden 0.5 -- the operating point is a recorded setting."""
+    suite = M.MetricSuite(MetricConfig(report_threshold=0.2))
+    # p=0.3 counts as an alarm at t=0.2 but not at t=0.5.
+    assert suite.evaluate([0, 1], [0.05, 0.3])["recall"] == 1.0
+    assert suite.evaluate([0, 1], [0.05, 0.3], threshold=0.5)["recall"] == 0.0
+
+
+def test_suite_beta_is_configurable_and_recorded():
+    # tp=1 fp=0 fn=1  =>  precision=1.0, recall=0.5
+    y, p = [1, 1, 0, 0], [0.9, 0.1, 0.1, 0.1]
+
+    f1 = M.MetricSuite(MetricConfig(beta=1.0)).evaluate(y, p)
+    f2 = M.MetricSuite(MetricConfig(beta=2.0)).evaluate(y, p)
+
+    assert f1["f2"] == pytest.approx(2 * 1.0 * 0.5 / (1.0 + 0.5))  # 0.667
+    assert f2["f2"] == pytest.approx(2.5 / 4.5)  # 0.556
+    # The beta that produced the number travels with it.
+    assert f1["beta"] == 1.0
+    assert f2["beta"] == 2.0
+
+
+def test_sweep_covers_the_whole_configured_grid():
+    suite = M.MetricSuite(MetricConfig(thresholds=(0.1, 0.5, 0.9)))
+    rng = np.random.default_rng(11)
+    y = (rng.random(200) < 0.1).astype(int)
+    p = rng.random(200)
+
+    table = suite.sweep(y, p)
+    assert len(table) == 3
+    assert list(table["threshold"]) == [0.1, 0.5, 0.9]
+    # Threshold-free metrics do not move with the operating point.
+    assert table["pr_auc"].nunique() == 1
+    assert table["brier"].nunique() == 1
+    # Threshold-bound ones do, monotonically.
+    assert list(table["recall"]) == sorted(table["recall"], reverse=True)
+
+
+def test_default_grid_spans_the_unit_interval():
+    grid = MetricConfig().thresholds
+    assert len(grid) == 99
+    assert min(grid) == pytest.approx(0.01)
+    assert max(grid) == pytest.approx(0.99)

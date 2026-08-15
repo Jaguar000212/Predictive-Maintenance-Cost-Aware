@@ -1,265 +1,346 @@
-"""Dataset loaders for AI4I 2020 and NASA C-MAPSS.
+"""Dataset loaders.
 
-Design rule: every loader validates its output and raises on anything
-unexpected. A malformed load that raises costs ten minutes; a malformed load
-that silently returns a plausible-looking frame costs a week of wrong results.
+Design rule: a loader validates its own output and raises rather than coercing.
+A malformed load that raises costs ten minutes; a malformed load that returns a
+plausible-looking frame costs a week of wrong results.
+
+Structure: `DatasetLoader` fixes the contract (`path`, `load`, `_require`), and
+each subclass owns exactly one file format. The base class prefixes every
+validation failure with the offending filename, so no subclass has to remember
+to. Adding a C-MAPSS subset is a `CMAPSSSchema.for_subset(...)` call; adding a
+new dataset is one new subclass and no edits to existing ones.
 """
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from . import config as C
+from .config import AI4ISchema, CMAPSSSchema, PathConfig
 
 
 class DataValidationError(RuntimeError):
-    """Raised when a loaded file does not match its expected structure."""
+    """A loaded file does not match its expected structure."""
 
 
-def _require(condition: bool, message: str) -> None:
-    if not condition:
-        raise DataValidationError(message)
+class DatasetLoader(ABC):
+    """Contract shared by every loader."""
+
+    @property
+    @abstractmethod
+    def path(self) -> Path:
+        """The file this loader reads."""
+
+    @abstractmethod
+    def load(self) -> pd.DataFrame:
+        """Return the validated frame."""
+
+    @property
+    def name(self) -> str:
+        return type(self).__name__
+
+    def _require(self, condition: bool, message: str) -> None:
+        if not condition:
+            raise DataValidationError(f"{self.path.name}: {message}")
+
+    def _require_exists(self) -> None:
+        if not self.path.exists():
+            raise DataValidationError(
+                f"file not found at {self.path}. Raw data is gitignored -- restore it "
+                "under data/raw/ before running."
+            )
 
 
 # ---------------------------------------------------------------------------
 # AI4I 2020
 # ---------------------------------------------------------------------------
-def load_ai4i(path: Path | str | None = None, *, validate: bool = True) -> pd.DataFrame:
-    """Load the AI4I 2020 predictive maintenance dataset.
+class AI4ILoader(DatasetLoader):
+    """Loader for the AI4I 2020 predictive maintenance CSV.
 
-    Returns all 14 columns with normalised names. The five per-mode failure
-    flags are included so EDA can audit them, but `config.AI4I_MODE_FLAGS`
-    lists them explicitly as banned from any feature matrix -- they are
-    deterministic functions of the label generator, i.e. pure leakage.
-
-    The `encoding="utf-8-sig"` is load-bearing: the file carries a UTF-8 BOM,
-    so without it the first column is named "\\ufeffUDI" and any lookup by the
-    string "UDI" fails.
+    Returns all 14 columns under normalised names. The five per-mode failure
+    flags are kept so EDA can audit them; `AI4ISchema.excluded_from_features`
+    is what bars them from a feature matrix.
     """
-    path = Path(path) if path is not None else C.AI4I_CSV
-    _require(path.exists(), f"AI4I csv not found at {path}")
 
-    df = pd.read_csv(path, encoding=C.AI4I_ENCODING)
+    def __init__(
+        self,
+        schema: AI4ISchema | None = None,
+        paths: PathConfig | None = None,
+        path: Path | str | None = None,
+        validate: bool = True,
+    ) -> None:
+        self.schema = schema or AI4ISchema()
+        self.paths = paths or PathConfig.default()
+        self._path_override = Path(path) if path is not None else None
+        self.validate = validate
 
-    missing = set(C.AI4I_COLUMN_MAP) - set(df.columns)
-    _require(
-        not missing,
-        f"AI4I csv missing expected columns {sorted(missing)}. "
-        f"Found: {list(df.columns)}. "
-        "A leading '\\ufeff' on the first name means the BOM was not stripped.",
-    )
+    @property
+    def path(self) -> Path:
+        return self._path_override or self.paths.ai4i_csv
 
-    df = df.rename(columns=C.AI4I_COLUMN_MAP)
-    df = df[list(C.AI4I_COLUMN_MAP.values())]
+    def load(self) -> pd.DataFrame:
+        self._require_exists()
 
-    if validate:
-        _require(
-            len(df) == C.AI4I_N_ROWS,
-            f"AI4I expected {C.AI4I_N_ROWS} rows, got {len(df)}",
+        # The file carries a UTF-8 BOM. pandas strips it under any declared
+        # encoding, so utf-8-sig is belt-and-braces here rather than required;
+        # the column check below is what would actually catch a mangled header.
+        df = pd.read_csv(self.path, encoding=self.schema.encoding)
+
+        missing = set(self.schema.column_map) - set(df.columns)
+        self._require(
+            not missing,
+            f"missing expected columns {sorted(missing)}. Found: {list(df.columns)}. "
+            "A leading '\\ufeff' on the first name means the BOM was not stripped.",
         )
-        _require(
+
+        df = df.rename(columns=self.schema.column_map)[list(self.schema.columns)]
+
+        if self.validate:
+            self._validate(df)
+        return df
+
+    def _validate(self, df: pd.DataFrame) -> None:
+        s = self.schema
+        if s.expected_rows is not None:
+            self._require(len(df) == s.expected_rows, f"expected {s.expected_rows} rows, got {len(df)}")
+        self._require(
             not df.isna().any().any(),
-            f"AI4I contains NaN in columns "
-            f"{df.columns[df.isna().any()].tolist()} -- the published file has none",
+            f"contains NaN in {df.columns[df.isna().any()].tolist()} -- the published file has none",
         )
-        _require(
-            df["udi"].is_unique,
-            "AI4I 'udi' is not unique; rows may have been duplicated",
-        )
-        _require(
+        self._require(df["udi"].is_unique, "'udi' is not unique; rows may have been duplicated")
+        self._require(
             set(df["type"].unique()) <= {"L", "M", "H"},
-            f"AI4I 'type' has unexpected levels: {sorted(df['type'].unique())}",
+            f"'type' has unexpected levels: {sorted(df['type'].unique())}",
         )
-        for col in [C.AI4I_TARGET, *C.AI4I_MODE_FLAGS]:
-            _require(
+        for col in (s.target, *s.mode_flags):
+            self._require(
                 set(df[col].unique()) <= {0, 1},
-                f"AI4I '{col}' is not binary; found {sorted(df[col].unique())}",
+                f"'{col}' is not binary; found {sorted(df[col].unique())}",
             )
-
-    return df
-
-
-def ai4i_feature_columns() -> list[str]:
-    """The only columns permitted in an AI4I feature matrix (pre-engineering)."""
-    return C.AI4I_SENSOR_FEATURES + C.AI4I_CATEGORICAL_FEATURES
 
 
 # ---------------------------------------------------------------------------
 # C-MAPSS
 # ---------------------------------------------------------------------------
-def load_cmapss(
-    split: str = "train",
-    subset: str = C.CMAPSS_SUBSET,
-    *,
-    data_dir: Path | str | None = None,
-    validate: bool = True,
-) -> pd.DataFrame:
-    """Load one C-MAPSS trajectory file as a tidy cycle-level frame.
+class CMAPSSLoader(DatasetLoader):
+    """Loader for one C-MAPSS trajectory file, as a tidy cycle-level frame.
 
-    Parameters
-    ----------
-    split : "train" or "test".
-    subset : "FD001".."FD004". This project uses FD001 only.
+    The raw files are whitespace-delimited with trailing whitespace on every
+    line and no header. Parsing with ``sep=" "`` yields 28 columns, two entirely
+    NaN, which silently shifts positional indexing. The regex separator plus the
+    column-count check below prevents that.
 
-    Notes
-    -----
-    The raw files are whitespace-delimited with *trailing* whitespace on every
-    line and no header row. Parsing with ``sep=" "`` produces 28 columns, two
-    of them entirely NaN, which silently shifts positional indexing. The regex
-    separator plus the hard column-count assertion below prevents that.
-
-    Column order is fixed by the NASA spec: unit, cycle, three operational
-    settings, then sensors 1-21. Sensor numbering starts at 1 at *column index
-    5*; an off-by-one here mislabels every sensor and produces no error.
+    Column order is fixed by the NASA spec and sensor numbering starts at 1 at
+    *column index 5*. An off-by-one mislabels every sensor and raises nothing.
     """
-    _require(split in {"train", "test"}, f"split must be 'train' or 'test', got {split!r}")
-    data_dir = Path(data_dir) if data_dir is not None else C.CMAPSS_DIR
-    path = data_dir / f"{split}_{subset}.txt"
-    _require(path.exists(), f"C-MAPSS file not found at {path}")
 
-    df = pd.read_csv(path, sep=r"\s+", header=None, engine="python")
+    def __init__(
+        self,
+        split: str = "train",
+        schema: CMAPSSSchema | None = None,
+        paths: PathConfig | None = None,
+        data_dir: Path | str | None = None,
+        validate: bool = True,
+    ) -> None:
+        if split not in {"train", "test"}:
+            raise ValueError(f"split must be 'train' or 'test', got {split!r}")
+        self.split = split
+        self.schema = schema or CMAPSSSchema()
+        self.paths = paths or PathConfig.default()
+        self._data_dir = Path(data_dir) if data_dir is not None else None
+        self.validate = validate
 
-    _require(
-        df.shape[1] == C.CMAPSS_N_COLUMNS,
-        f"{path.name}: expected {C.CMAPSS_N_COLUMNS} columns, parsed {df.shape[1]}. "
-        "Check the delimiter -- trailing whitespace can create phantom columns.",
-    )
-    df.columns = C.CMAPSS_COLUMNS
+    @property
+    def data_dir(self) -> Path:
+        return self._data_dir or self.paths.cmapss_dir
 
-    df["unit"] = df["unit"].astype(int)
-    df["cycle"] = df["cycle"].astype(int)
+    @property
+    def path(self) -> Path:
+        return self.data_dir / f"{self.split}_{self.schema.subset}.txt"
 
-    if validate:
-        _require(
-            not df.isna().any().any(),
-            f"{path.name} contains NaN in {df.columns[df.isna().any()].tolist()}",
+    def load(self) -> pd.DataFrame:
+        self._require_exists()
+        df = pd.read_csv(self.path, sep=r"\s+", header=None, engine="python")
+
+        self._require(
+            df.shape[1] == self.schema.n_columns,
+            f"expected {self.schema.n_columns} columns, parsed {df.shape[1]}. "
+            "Check the delimiter -- trailing whitespace can create phantom columns.",
         )
-        expected = C.CMAPSS_EXPECTED_UNITS.get(subset, {}).get(split)
+        df.columns = list(self.schema.columns)
+        df["unit"] = df["unit"].astype(int)
+        df["cycle"] = df["cycle"].astype(int)
+
+        if self.validate:
+            self._validate(df)
+        return df
+
+    def _validate(self, df: pd.DataFrame) -> None:
+        self._require(not df.isna().any().any(), f"contains NaN in {df.columns[df.isna().any()].tolist()}")
+
+        expected = self.schema.expected_units(self.split)
         if expected is not None:
-            _require(
+            self._require(
                 df["unit"].nunique() == expected,
-                f"{path.name}: expected {expected} units, found {df['unit'].nunique()}",
+                f"expected {expected} units, found {df['unit'].nunique()}",
             )
-        # Units must be a contiguous 1..N block; the RUL file is matched to
+
+        # Units must form a contiguous 1..N block: the RUL file is matched to
         # units positionally, and that is only safe if this holds.
         units = np.sort(df["unit"].unique())
-        _require(
+        self._require(
             np.array_equal(units, np.arange(1, len(units) + 1)),
-            f"{path.name}: unit ids are not a contiguous 1..N block: "
-            f"min={units.min()}, max={units.max()}, n={len(units)}",
+            f"unit ids are not a contiguous 1..N block: min={units.min()}, "
+            f"max={units.max()}, n={len(units)}",
         )
-        # Each trajectory must be a complete 1..T cycle sequence in order.
+
         for unit, grp in df.groupby("unit", sort=True):
-            cyc = grp["cycle"].to_numpy()
-            _require(
-                np.array_equal(cyc, np.arange(1, len(cyc) + 1)),
-                f"{path.name}: unit {unit} has non-contiguous or unsorted cycles",
+            cycles = grp["cycle"].to_numpy()
+            self._require(
+                np.array_equal(cycles, np.arange(1, len(cycles) + 1)),
+                f"unit {unit} has non-contiguous or unsorted cycles",
             )
 
-    return df
 
+class CMAPSSRULLoader(DatasetLoader):
+    """Loader for the true remaining-useful-life vector of the *test* split.
 
-def load_cmapss_rul(
-    subset: str = C.CMAPSS_SUBSET,
-    *,
-    data_dir: Path | str | None = None,
-) -> pd.Series:
-    """Load the true remaining-useful-life vector for the *test* trajectories.
-
-    The file is a bare column of numbers with no unit identifier. It is matched
-    to units **by position**: line i corresponds to test unit i+1. This is the
-    convention NASA distributes it under, and `load_cmapss` asserts that test
-    unit ids really are the contiguous block 1..N, which is what makes the
-    positional match safe.
-
-    Returns a Series indexed by unit id.
+    The file is a bare column of numbers with no unit identifier, matched to
+    units **by position**: line i is test unit i+1. That is the convention NASA
+    distributes it under, and `CMAPSSLoader` asserts test unit ids really are a
+    contiguous 1..N block, which is what makes the positional match safe.
     """
-    data_dir = Path(data_dir) if data_dir is not None else C.CMAPSS_DIR
-    path = data_dir / f"RUL_{subset}.txt"
-    _require(path.exists(), f"C-MAPSS RUL file not found at {path}")
 
-    rul = pd.read_csv(path, sep=r"\s+", header=None, engine="python")
-    _require(rul.shape[1] == 1, f"{path.name}: expected 1 column, got {rul.shape[1]}")
+    def __init__(
+        self,
+        schema: CMAPSSSchema | None = None,
+        paths: PathConfig | None = None,
+        data_dir: Path | str | None = None,
+    ) -> None:
+        self.schema = schema or CMAPSSSchema()
+        self.paths = paths or PathConfig.default()
+        self._data_dir = Path(data_dir) if data_dir is not None else None
 
-    expected = C.CMAPSS_EXPECTED_UNITS.get(subset, {}).get("test")
-    if expected is not None:
-        _require(
-            len(rul) == expected,
-            f"{path.name}: expected {expected} RUL values, got {len(rul)}",
+    @property
+    def data_dir(self) -> Path:
+        return self._data_dir or self.paths.cmapss_dir
+
+    @property
+    def path(self) -> Path:
+        return self.data_dir / f"RUL_{self.schema.subset}.txt"
+
+    def load(self) -> pd.DataFrame:
+        return self.load_series().to_frame()
+
+    def load_series(self) -> pd.Series:
+        self._require_exists()
+        rul = pd.read_csv(self.path, sep=r"\s+", header=None, engine="python")
+        self._require(rul.shape[1] == 1, f"expected 1 column, got {rul.shape[1]}")
+
+        expected = self.schema.expected_test_units
+        if expected is not None:
+            self._require(len(rul) == expected, f"expected {expected} RUL values, got {len(rul)}")
+
+        return pd.Series(
+            rul[0].astype(int).to_numpy(),
+            index=pd.Index(range(1, len(rul) + 1), name="unit"),
+            name="rul_at_last_cycle",
         )
 
-    out = pd.Series(
-        rul[0].astype(int).to_numpy(),
-        index=pd.Index(range(1, len(rul) + 1), name="unit"),
-        name="rul_at_last_cycle",
-    )
-    return out
 
+class CMAPSSLifetimeBuilder:
+    """Builds the unit-level lifetime table in standard survival-analysis form.
 
-def cmapss_lifetimes(
-    subset: str = C.CMAPSS_SUBSET,
-    *,
-    data_dir: Path | str | None = None,
-) -> pd.DataFrame:
-    """Build the unit-level lifetime table in standard survival-analysis form.
-
-    One row per engine, with the two columns any censored-lifetime estimator
+    One row per engine with the two columns any censored-lifetime estimator
     needs: a ``duration`` and an ``event`` indicator.
 
-    Censoring structure -- this is the part that silently corrupts results if
-    misread:
+    Censoring structure -- the part that silently corrupts results if misread:
 
-    * **train** trajectories run all the way to failure. ``duration`` is the
-      last observed cycle and ``event = 1`` (failure observed, uncensored).
+    * **train** trajectories run to failure. ``duration`` is the last observed
+      cycle and ``event = 1`` (uncensored).
+    * **test** trajectories are truncated *before* failure. ``duration`` is the
+      last observed cycle, which is a **censoring time, not a lifetime**, and
+      ``event = 0``. Treating it as a lifetime biases every fitted distribution
+      downward and nothing complains.
+    * ``true_duration`` is ``last_cycle + RUL`` for test units. Because the RUL
+      file is supplied, the test set is effectively **de-censored**: it is ground
+      truth for evaluation, not an input. Fitting on it and reporting a
+      "censored" model is circular. Keep it out of any fit.
 
-    * **test** trajectories are truncated at some point *before* failure.
-      ``duration`` is the last observed cycle, which is a **censoring time,
-      not a lifetime**, and ``event = 0``. Treating a test engine's last cycle
-      as its lifetime biases every fitted lifetime downward, and nothing in the
-      pipeline will complain.
-
-    * ``true_duration`` is only populated for test units, as
-      ``last_cycle + RUL``. Because the RUL file is supplied, the test set is
-      effectively **de-censored**: it is ground truth for evaluation, not an
-      input. Fitting on ``true_duration`` and then reporting a "censored"
-      model would be circular. Keep it out of any fit.
+    Composes three loaders rather than reading files itself, so a test can inject
+    fixtures through `data_dir` without touching the real dataset.
     """
-    frames = []
 
-    train = load_cmapss("train", subset, data_dir=data_dir)
-    train_life = (
-        train.groupby("unit")["cycle"]
-        .max()
-        .rename("duration")
-        .reset_index()
-        .assign(split="train", event=1, true_duration=lambda d: d["duration"])
-    )
-    frames.append(train_life)
+    def __init__(
+        self,
+        schema: CMAPSSSchema | None = None,
+        paths: PathConfig | None = None,
+        data_dir: Path | str | None = None,
+    ) -> None:
+        self.schema = schema or CMAPSSSchema()
+        self.paths = paths or PathConfig.default()
+        self.data_dir = data_dir
+        self.train_loader = CMAPSSLoader("train", self.schema, self.paths, data_dir)
+        self.test_loader = CMAPSSLoader("test", self.schema, self.paths, data_dir)
+        self.rul_loader = CMAPSSRULLoader(self.schema, self.paths, data_dir)
 
-    test = load_cmapss("test", subset, data_dir=data_dir)
-    rul = load_cmapss_rul(subset, data_dir=data_dir)
-    test_life = (
-        test.groupby("unit")["cycle"].max().rename("duration").reset_index().assign(split="test", event=0)
-    )
-    _require(
-        set(test_life["unit"]) == set(rul.index),
-        "C-MAPSS test unit ids do not match the RUL file's positional index",
-    )
-    test_life["true_duration"] = test_life["duration"] + test_life["unit"].map(rul)
-    frames.append(test_life)
+    def build(self) -> pd.DataFrame:
+        train_life = (
+            self.train_loader.load()
+            .groupby("unit")["cycle"]
+            .max()
+            .rename("duration")
+            .reset_index()
+            .assign(split="train", event=1, true_duration=lambda d: d["duration"])
+        )
 
-    out = pd.concat(frames, ignore_index=True)
-    out = out[["split", "unit", "duration", "event", "true_duration"]]
+        test_life = (
+            self.test_loader.load()
+            .groupby("unit")["cycle"]
+            .max()
+            .rename("duration")
+            .reset_index()
+            .assign(split="test", event=0)
+        )
+        rul = self.rul_loader.load_series()
+        if set(test_life["unit"]) != set(rul.index):
+            raise DataValidationError("C-MAPSS test unit ids do not match the RUL file's positional index")
+        test_life["true_duration"] = test_life["duration"] + test_life["unit"].map(rul)
 
-    _require(
-        (out["duration"] > 0).all(),
-        "C-MAPSS lifetime table contains a non-positive duration",
-    )
-    _require(
-        (out["true_duration"] >= out["duration"]).all(),
-        "C-MAPSS true_duration is below the observed duration for some unit",
-    )
-    return out
+        out = pd.concat([train_life, test_life], ignore_index=True)
+        out = out[["split", "unit", "duration", "event", "true_duration"]]
+
+        if not (out["duration"] > 0).all():
+            raise DataValidationError("lifetime table contains a non-positive duration")
+        if not (out["true_duration"] >= out["duration"]).all():
+            raise DataValidationError("true_duration is below the observed duration for some unit")
+        return out
+
+
+# ---------------------------------------------------------------------------
+# Convenience wrappers
+# ---------------------------------------------------------------------------
+# Thin delegations for the common case. Construct the classes directly when a
+# non-default schema, path, or subset is needed.
+
+
+def load_ai4i(path: Path | str | None = None, *, validate: bool = True, **kwargs) -> pd.DataFrame:
+    return AI4ILoader(path=path, validate=validate, **kwargs).load()
+
+
+def load_cmapss(split: str = "train", subset: str = "FD001", **kwargs) -> pd.DataFrame:
+    schema = kwargs.pop("schema", None) or CMAPSSSchema.for_subset(subset)
+    return CMAPSSLoader(split, schema, **kwargs).load()
+
+
+def load_cmapss_rul(subset: str = "FD001", **kwargs) -> pd.Series:
+    schema = kwargs.pop("schema", None) or CMAPSSSchema.for_subset(subset)
+    return CMAPSSRULLoader(schema, **kwargs).load_series()
+
+
+def cmapss_lifetimes(subset: str = "FD001", **kwargs) -> pd.DataFrame:
+    schema = kwargs.pop("schema", None) or CMAPSSSchema.for_subset(subset)
+    return CMAPSSLifetimeBuilder(schema, **kwargs).build()

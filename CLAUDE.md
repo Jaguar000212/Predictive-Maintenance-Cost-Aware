@@ -180,17 +180,50 @@ absent despite being configured in `pyproject.toml`; `black` is installed.
 Actual, as of the EDA milestone:
 
 ```
-src/pdm/config.py    Paths, column schemas, determinism grouping. Single source of
-                     truth — nothing else hardcodes a path or column name.
-src/pdm/loaders.py   load_ai4i, load_cmapss, load_cmapss_rul, cmapss_lifetimes
-src/pdm/eda.py       Four EDA sections; each returns (report_text, {name: DataFrame})
-scripts/run_eda.py   CLI entry point; writes reports/eda/
-docs/DECISIONS.md    Rationale for every locked decision
+src/pdm/config.py      Frozen, serialisable settings. Depends on nothing.
+src/pdm/loaders.py     DatasetLoader ABC + AI4ILoader, CMAPSSLoader,
+                       CMAPSSRULLoader, CMAPSSLifetimeBuilder
+src/pdm/eda.py         Analysis ABC + four analyses, composed by EDAReport
+src/pdm/eval/metrics.py  Pure metric functions + MetricSuite
+scripts/run_eda.py     Composition root: wires loaders to analyses
+tests/                 test_config, test_loaders, test_metrics
+docs/DECISIONS.md      Rationale for every locked decision
 ```
+
+Dependency direction is one-way: `config` → `loaders` / `eda` / `eval`. Analyses
+never load files; frames arrive through their constructors, and `scripts/` is the
+only place that knows both halves. That is what lets any analysis run against a
+fixture.
+
+### Configuration
+
+**Every setting that can change a result is a field on a frozen dataclass in
+`config.py`.** No result-affecting literal belongs anywhere else.
+
+- Frozen, so mid-run mutation raises instead of silently producing
+  irreproducible numbers
+- `ExperimentConfig.to_dict()` feeds the results JSON, which is what makes the
+  "no figure from an unrecorded run" rule enforceable
+- `config.with_(...)` returns a copy — never edit defaults to run a variant, or
+  the recorded history stops matching the code
+
+`DeterminismConfig` is the one to watch: moving TWF between groups moves the
+headline ceiling from 84.66% to 97.35%. It validates that every mode is
+classified exactly once, so a mode cannot silently vanish from the arithmetic.
+
+`CostConfig` ships **deliberately unset** and `validate()` raises. No cost figure
+can be produced before the ratio is chosen, justified, and recorded in
+`docs/DECISIONS.md`.
 
 Loaders **assert** their output shape and raise `DataValidationError` rather than
 coercing. That is deliberate: a malformed load that raises costs minutes, one that
-returns a plausible frame costs a week.
+returns a plausible frame costs a week. The base class prefixes every failure with
+the offending filename.
+
+Correction to a common assumption: `encoding="utf-8-sig"` on the AI4I read is
+**defensive, not required**. Measured on pandas 2.3, both the C and python engines
+strip the UTF-8 BOM whatever encoding is declared. It still matters outside pandas
+— `open(path, encoding="utf-8")` on that file yields a column named `﻿UDI`.
 
 `cmapss_lifetimes()` returns the canonical survival form — one row per engine with
 `duration` / `event` / `true_duration` — which is what Layer 1 consumes. `duration` for

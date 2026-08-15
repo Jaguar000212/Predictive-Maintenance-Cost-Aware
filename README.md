@@ -103,16 +103,48 @@ conda run -n AI python -m pytest tests/ -q
 Modules under `src/pdm/` use relative imports and cannot be executed directly —
 run the entry points in `scripts/` instead.
 
+## Design
+
+Layered, one-way dependencies, composed at the edge:
+
+```
+config    frozen, serialisable settings   depends on nothing
+loaders   file -> validated DataFrame     depends on config
+eda       DataFrame -> analysis           depends on config (schemas only)
+eval      arrays -> metrics               depends on config (settings only)
+```
+
+Analyses never load files — frames arrive through constructors, and `scripts/`
+is the only place that knows both halves. Adding a dataset means one
+`DatasetLoader` subclass; adding a report section means one `Analysis` subclass
+appended to a list. No existing code changes either way.
+
+**Every setting that can change a result is a field on a frozen dataclass in
+`config.py`.** Frozen so mid-run mutation raises rather than silently producing
+irreproducible numbers, and serialisable so each results JSON records the exact
+configuration behind it. Two carry particular weight:
+
+- `DeterminismConfig` — which failure modes count as recoverable. Moving TWF
+  between groups moves the headline ceiling by 12.7 points, so it is a recorded
+  setting rather than a constant.
+- `CostConfig` — ships deliberately **unset**, and raises if a cost is computed
+  before the ratio is chosen and justified. Picking it after seeing model results
+  would be indistinguishable from tuning toward the hypothesis.
+
 ## Metrics
 
 Accuracy is **not implemented**, deliberately: a constant-negative model scores
 96.61% on this data. Evaluation uses PR-AUC, recall, F2, Brier score, and cost per
 1000h. PR-AUC is average precision, not trapezoidal area — the two differ and only
-one is intended.
+one is intended. The decision threshold has no default; it is always explicit.
 
 ## Status
 
 EDA complete; evaluation harness in progress. No models trained yet.
+
+59 tests cover the config guards, the four loader corruption paths (against
+synthetic fixtures, not the real data), and every metric against hand-computed
+values.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
 Rationale for each decision is in `docs/DECISIONS.md`.

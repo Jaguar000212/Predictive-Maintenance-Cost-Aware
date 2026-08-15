@@ -2,6 +2,7 @@
 
 from .metrics import (
     METRIC_NAMES,
+    MetricSuite,
     brier,
     classification_metrics,
     confusion_counts,
@@ -13,6 +14,7 @@ from .metrics import (
 
 __all__ = [
     "METRIC_NAMES",
+    "MetricSuite",
     "brier",
     "classification_metrics",
     "confusion_counts",

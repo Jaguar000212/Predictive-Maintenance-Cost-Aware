@@ -1,120 +1,414 @@
-"""Paths, column schemas, and dataset constants.
+"""Configuration objects.
 
-Single source of truth. Nothing else in the codebase should hardcode a path,
-a column name, or a failure-mode grouping.
+Every setting that can change a result lives here as a field on a frozen
+dataclass, never as a literal buried in code. Two properties matter:
+
+* **Frozen.** Configuration mutated halfway through a run produces results that
+  cannot be reproduced and raises nothing. `frozen=True` makes that a
+  `FrozenInstanceError` at the point of the mistake.
+* **Serialisable.** `ExperimentConfig.to_dict()` feeds the results JSON, so every
+  recorded number carries the exact configuration that produced it. That is what
+  makes the "no figure from an unrecorded run" rule enforceable.
+
+Defaults reproduce the committed EDA results. Override by constructing a config
+and passing it in -- do not edit the defaults to run a variant, or the recorded
+history stops matching the code.
 """
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
+from typing import Any, Literal
 
-# --- Paths -----------------------------------------------------------------
-# config.py -> pdm -> src -> repo root
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
-DATA_RAW = REPO_ROOT / "data" / "raw"
-AI4I_CSV = DATA_RAW / "AI4I_2020" / "ai4i2020.csv"
-CMAPSS_DIR = DATA_RAW / "CMAPSS_2008"
-
-REPORTS_DIR = REPO_ROOT / "reports" / "eda"
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
 
 
-# --- AI4I 2020 -------------------------------------------------------------
-AI4I_N_ROWS = 10_000
+@dataclass(frozen=True)
+class PathConfig:
+    """Filesystem layout. Injectable so tests can point at fixtures."""
 
-# The CSV is written with a UTF-8 BOM, so the first header cell parses as
-# "﻿UDI" unless the file is opened with encoding="utf-8-sig".
-AI4I_ENCODING = "utf-8-sig"
+    repo_root: Path
+    data_raw: Path
+    reports_dir: Path
+    results_dir: Path
 
-# Raw header -> internal name. Raw names carry units in square brackets, which
-# are awkward to reference and break some libraries' formula interfaces.
-AI4I_COLUMN_MAP = {
-    "UDI": "udi",
-    "Product ID": "product_id",
-    "Type": "type",
-    "Air temperature [K]": "air_temp_k",
-    "Process temperature [K]": "process_temp_k",
-    "Rotational speed [rpm]": "rot_speed_rpm",
-    "Torque [Nm]": "torque_nm",
-    "Tool wear [min]": "tool_wear_min",
-    "Machine failure": "machine_failure",
-    # Failure-mode flags keep their canonical uppercase acronyms.
-    "TWF": "TWF",
-    "HDF": "HDF",
-    "PWF": "PWF",
-    "OSF": "OSF",
-    "RNF": "RNF",
+    @classmethod
+    def default(cls) -> PathConfig:
+        # config.py -> pdm -> src -> repo root
+        root = Path(__file__).resolve().parents[2]
+        return cls(
+            repo_root=root,
+            data_raw=root / "data" / "raw",
+            reports_dir=root / "reports",
+            results_dir=root / "results",
+        )
+
+    @property
+    def ai4i_csv(self) -> Path:
+        return self.data_raw / "AI4I_2020" / "ai4i2020.csv"
+
+    @property
+    def cmapss_dir(self) -> Path:
+        return self.data_raw / "CMAPSS_2008"
+
+    @property
+    def eda_dir(self) -> Path:
+        return self.reports_dir / "eda"
+
+
+# ---------------------------------------------------------------------------
+# Dataset schemas
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AI4ISchema:
+    """Column names and structural expectations for AI4I 2020.
+
+    The published CSV carries a UTF-8 BOM. `encoding="utf-8-sig"` is explicit
+    rather than strictly required: pandas 2.3 strips the BOM under both the C
+    and python engines whatever encoding is declared (measured, not assumed).
+    It matters for anything reading the file outside pandas -- `open()`, the
+    `csv` module, or another tool -- where plain utf-8 names the first column
+    "\\ufeffUDI" and every lookup by "UDI" fails. Declaring it here keeps that
+    true regardless of who reads the file next.
+    """
+
+    encoding: str = "utf-8-sig"
+    expected_rows: int | None = 10_000
+    target: str = "machine_failure"
+
+    # (raw header, internal name). A tuple of pairs rather than a dict so the
+    # dataclass stays genuinely immutable and hashable.
+    column_pairs: tuple[tuple[str, str], ...] = (
+        ("UDI", "udi"),
+        ("Product ID", "product_id"),
+        ("Type", "type"),
+        ("Air temperature [K]", "air_temp_k"),
+        ("Process temperature [K]", "process_temp_k"),
+        ("Rotational speed [rpm]", "rot_speed_rpm"),
+        ("Torque [Nm]", "torque_nm"),
+        ("Tool wear [min]", "tool_wear_min"),
+        ("Machine failure", "machine_failure"),
+        ("TWF", "TWF"),
+        ("HDF", "HDF"),
+        ("PWF", "PWF"),
+        ("OSF", "OSF"),
+        ("RNF", "RNF"),
+    )
+
+    mode_flags: tuple[str, ...] = ("TWF", "HDF", "PWF", "OSF", "RNF")
+    numeric_features: tuple[str, ...] = (
+        "air_temp_k",
+        "process_temp_k",
+        "rot_speed_rpm",
+        "torque_nm",
+        "tool_wear_min",
+    )
+    categorical_features: tuple[str, ...] = ("type",)
+    identifier_columns: tuple[str, ...] = ("udi", "product_id")
+
+    @property
+    def column_map(self) -> dict[str, str]:
+        return dict(self.column_pairs)
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        return tuple(internal for _, internal in self.column_pairs)
+
+    @property
+    def feature_columns(self) -> tuple[str, ...]:
+        """Columns permitted in a feature matrix, before engineering.
+
+        `type` is included and must stay: the OSF threshold is tier-dependent
+        (L/M/H), so the OSF share of the recall ceiling is unreachable without it.
+        """
+        return self.numeric_features + self.categorical_features
+
+    @property
+    def excluded_from_features(self) -> tuple[str, ...]:
+        """Never admissible as features: identifiers, the target, and mode flags.
+
+        The mode flags are deterministic functions of the label's generator --
+        leaving them in is leakage that scores ~0.99 and raises nothing.
+        """
+        return self.identifier_columns + (self.target,) + self.mode_flags
+
+
+_CMAPSS_UNIT_COUNTS: dict[str, tuple[int, int]] = {
+    "FD001": (100, 100),
+    "FD002": (260, 259),
+    "FD003": (100, 100),
+    "FD004": (248, 249),
 }
 
-AI4I_TARGET = "machine_failure"
 
-# All five per-mode indicator flags.
-AI4I_MODE_FLAGS = ["TWF", "HDF", "PWF", "OSF", "RNF"]
+@dataclass(frozen=True)
+class CMAPSSSchema:
+    """Column layout and unit counts for one C-MAPSS subset.
 
-# Locked decision: mode flags are dropped from the feature matrix. They are
-# leakage -- each one is a deterministic function of the label's generator.
-# They are retained in the loaded frame purely for EDA and ceiling analysis.
-AI4I_SENSOR_FEATURES = [
-    "air_temp_k",
-    "process_temp_k",
-    "rot_speed_rpm",
-    "torque_nm",
-    "tool_wear_min",
-]
-AI4I_CATEGORICAL_FEATURES = ["type"]
+    The bundled NASA readme describes the 26 columns as "sensor measurement
+    1 ... 26". That is a typo in the original distribution: columns 1-5 are
+    unit, cycle, and three operational settings, leaving 21 sensors in columns
+    6-26. Taking the readme literally produces 26 sensor names for 21 sensors
+    and silently mislabels every one of them.
+    """
 
-# Columns that must never enter a feature matrix.
-AI4I_EXCLUDED_FROM_FEATURES = ["udi", "product_id", AI4I_TARGET] + AI4I_MODE_FLAGS
+    subset: str = "FD001"
+    n_op_settings: int = 3
+    n_sensors: int = 21
+    expected_train_units: int | None = 100
+    expected_test_units: int | None = 100
+
+    @classmethod
+    def for_subset(cls, subset: str, **overrides: Any) -> CMAPSSSchema:
+        """Build the schema for any subset, with the right unit counts."""
+        if subset not in _CMAPSS_UNIT_COUNTS:
+            raise ValueError(
+                f"unknown C-MAPSS subset {subset!r}; expected one of {sorted(_CMAPSS_UNIT_COUNTS)}"
+            )
+        train, test = _CMAPSS_UNIT_COUNTS[subset]
+        return cls(subset=subset, expected_train_units=train, expected_test_units=test, **overrides)
+
+    def expected_units(self, split: str) -> int | None:
+        if split == "train":
+            return self.expected_train_units
+        if split == "test":
+            return self.expected_test_units
+        raise ValueError(f"split must be 'train' or 'test', got {split!r}")
+
+    @property
+    def id_columns(self) -> tuple[str, ...]:
+        return ("unit", "cycle")
+
+    @property
+    def op_columns(self) -> tuple[str, ...]:
+        return tuple(f"op_setting_{i}" for i in range(1, self.n_op_settings + 1))
+
+    @property
+    def sensor_columns(self) -> tuple[str, ...]:
+        return tuple(f"sensor_{i}" for i in range(1, self.n_sensors + 1))
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        return self.id_columns + self.op_columns + self.sensor_columns
+
+    @property
+    def n_columns(self) -> int:
+        return len(self.columns)
 
 
-# --- Failure-mode determinism grouping -------------------------------------
-# This grouping is a MODELLING ASSUMPTION, not a fact recorded in the file.
-# It comes from the AI4I 2020 generator description (Matzka 2020):
-#
-#   HDF  heat dissipation failure -- fires when (process_temp - air_temp) is
-#        below a fixed threshold AND rotational speed is below a fixed
-#        threshold. Both operands are observed features => deterministic.
-#   PWF  power failure -- fires when torque * angular_velocity falls outside a
-#        fixed wattage band. Both operands are observed features
-#        => deterministic.
-#   OSF  overstrain failure -- fires when tool_wear * torque exceeds a limit
-#        that depends on the product `type` (L/M/H). All operands are observed
-#        features => deterministic.
-#
-#   TWF  tool wear failure -- the tool is retired at a wear threshold drawn
-#        uniformly from [200, 240] minutes. The draw is NOT observable, so the
-#        boundary is only partially recoverable: rows inside the overlap band
-#        are genuinely ambiguous. Treated as semi-deterministic.
-#
-#   RNF  random failure -- an independent 0.1% chance per process, unrelated to
-#        every feature. Irreducible by construction.
-#
-# A model can only be expected to recover the deterministic modes, so those
-# define the recall ceiling. TWF is reported separately so the sensitivity of
-# the ceiling to that judgement call is visible rather than buried.
-AI4I_DETERMINISTIC_MODES = ["HDF", "PWF", "OSF"]
-AI4I_SEMI_DETERMINISTIC_MODES = ["TWF"]
-AI4I_STOCHASTIC_MODES = ["RNF"]
+# ---------------------------------------------------------------------------
+# Analysis settings
+# ---------------------------------------------------------------------------
 
 
-# --- C-MAPSS ---------------------------------------------------------------
-CMAPSS_SUBSET = "FD001"
+@dataclass(frozen=True)
+class DeterminismConfig:
+    """Which AI4I failure modes count as recoverable from features.
 
-CMAPSS_N_OP_SETTINGS = 3
-CMAPSS_N_SENSORS = 21
+    This is a MODELLING ASSUMPTION and it sets the headline recall ceiling, so
+    it is configuration rather than a constant. From the generator description
+    (Matzka 2020):
 
-# The bundled readme.txt says the 26 columns are "sensor measurement 1 ... 26".
-# That is a typo in the original NASA distribution. Columns 1-5 are unit,
-# cycle, and three operational settings; the 21 sensors occupy columns 6-26.
-CMAPSS_ID_COLUMNS = ["unit", "cycle"]
-CMAPSS_OP_COLUMNS = [f"op_setting_{i}" for i in range(1, CMAPSS_N_OP_SETTINGS + 1)]
-CMAPSS_SENSOR_COLUMNS = [f"sensor_{i}" for i in range(1, CMAPSS_N_SENSORS + 1)]
-CMAPSS_COLUMNS = CMAPSS_ID_COLUMNS + CMAPSS_OP_COLUMNS + CMAPSS_SENSOR_COLUMNS
-CMAPSS_N_COLUMNS = len(CMAPSS_COLUMNS)  # 26
+      HDF/PWF/OSF  exact threshold rules over observed features => deterministic
+      TWF          tool retired at a wear threshold drawn from U[200, 240] min;
+                   the draw is unobservable, so the boundary is only partly
+                   recoverable => semi-deterministic
+      RNF          independent 0.1% chance, unrelated to every feature
+                   => irreducible
 
-CMAPSS_EXPECTED_UNITS = {
-    "FD001": {"train": 100, "test": 100},
-    "FD002": {"train": 260, "test": 259},
-    "FD003": {"train": 100, "test": 100},
-    "FD004": {"train": 248, "test": 249},
-}
+    Moving TWF between groups moves the ceiling from 84.66% to 97.35%. Change it
+    deliberately and record it; never to make a result look better.
+    """
+
+    deterministic: tuple[str, ...] = ("HDF", "PWF", "OSF")
+    semi_deterministic: tuple[str, ...] = ("TWF",)
+    stochastic: tuple[str, ...] = ("RNF",)
+
+    def validate_against(self, mode_flags: tuple[str, ...]) -> None:
+        """Every mode must be classified exactly once.
+
+        An unclassified mode would silently vanish from the ceiling arithmetic;
+        a duplicated one would be double-counted.
+        """
+        assigned = self.deterministic + self.semi_deterministic + self.stochastic
+        duplicates = {m for m in assigned if assigned.count(m) > 1}
+        if duplicates:
+            raise ValueError(f"failure modes classified more than once: {sorted(duplicates)}")
+        missing = set(mode_flags) - set(assigned)
+        if missing:
+            raise ValueError(f"failure modes with no determinism classification: {sorted(missing)}")
+        unknown = set(assigned) - set(mode_flags)
+        if unknown:
+            raise ValueError(f"determinism config references unknown modes: {sorted(unknown)}")
+
+    @property
+    def recoverable_strict(self) -> tuple[str, ...]:
+        return self.deterministic
+
+    @property
+    def recoverable_extended(self) -> tuple[str, ...]:
+        return self.deterministic + self.semi_deterministic
+
+
+@dataclass(frozen=True)
+class EDAConfig:
+    """Settings for the exploratory analyses.
+
+    `constant_detection` defaults to "nunique" for a measured reason: two FD001
+    columns are constant only to floating-point tolerance (std 3e-18 and 5e-15),
+    so an `std == 0` test misses them and they survive into a scaler as NaN.
+    """
+
+    constant_detection: Literal["nunique", "std_tolerance"] = "nunique"
+    constant_std_tolerance: float = 1e-12
+    variance_preview_rows: int = 12
+
+
+# ---------------------------------------------------------------------------
+# Experiment settings
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CVConfig:
+    """Cross-validation protocol.
+
+    Repeated stratified k-fold, not a single split: one 80/20 split leaves ~68
+    positives in test, where between-model differences are indistinguishable
+    from noise.
+    """
+
+    n_splits: int = 5
+    n_repeats: int = 5
+    random_state: int = 42
+    shuffle: bool = True
+
+    def __post_init__(self) -> None:
+        if self.n_splits < 2:
+            raise ValueError(f"n_splits must be >= 2, got {self.n_splits}")
+        if self.n_repeats < 1:
+            raise ValueError(f"n_repeats must be >= 1, got {self.n_repeats}")
+
+    @property
+    def n_fits(self) -> int:
+        return self.n_splits * self.n_repeats
+
+
+@dataclass(frozen=True)
+class MetricConfig:
+    """Metric settings.
+
+    `beta = 2` weights recall 4x precision. That 4:1 is a stand-in for the real
+    cost ratio in `CostConfig`; when F-beta and the cost model disagree about
+    which model wins, the cost model is authoritative.
+
+    `thresholds` is the sweep the cost curve is built over. The project's central
+    claim is that this axis moves cost more than algorithm choice does, so the
+    grid is configuration, not a magic number in a loop.
+    """
+
+    beta: float = 2.0
+    thresholds: tuple[float, ...] = tuple(round(t, 3) for t in [i / 100 for i in range(1, 100)])
+    report_threshold: float = 0.5
+
+    def __post_init__(self) -> None:
+        if self.beta <= 0:
+            raise ValueError(f"beta must be positive, got {self.beta}")
+        if not self.thresholds:
+            raise ValueError("thresholds grid is empty")
+        bad = [t for t in self.thresholds if not 0.0 <= t <= 1.0]
+        if bad:
+            raise ValueError(f"thresholds must lie in [0, 1]; offending values: {bad[:5]}")
+
+
+@dataclass(frozen=True)
+class CostConfig:
+    """Layer 4 cost constants, in currency units.
+
+    **Deliberately unset.** The ratio of missed-failure cost to false-alarm cost
+    determines the optimal threshold, decides which recall ceiling is worth
+    targeting, and is what the central hypothesis is measured against. Choosing
+    it after seeing model results is indistinguishable from tuning toward the
+    hypothesis.
+
+    `validate()` raises rather than defaulting, so no cost number can be produced
+    before the decision is made and recorded in docs/DECISIONS.md.
+    """
+
+    missed_failure: float | None = None
+    false_alarm: float | None = None
+    inspection: float | None = None
+    horizon_hours: float = 1000.0
+
+    @property
+    def is_configured(self) -> bool:
+        return None not in (self.missed_failure, self.false_alarm, self.inspection)
+
+    @property
+    def ratio(self) -> float:
+        self.validate()
+        assert self.missed_failure is not None and self.false_alarm is not None
+        return self.missed_failure / self.false_alarm
+
+    def validate(self) -> None:
+        if not self.is_configured:
+            unset = [n for n in ("missed_failure", "false_alarm", "inspection") if getattr(self, n) is None]
+            raise ValueError(
+                f"cost constants not set: {unset}. This is a pending project decision, "
+                "not an oversight -- choose the values with a citable justification and "
+                "record it in docs/DECISIONS.md before any cost figure is computed."
+            )
+        for name in ("missed_failure", "false_alarm", "inspection"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be non-negative, got {getattr(self, name)}")
+
+
+@dataclass(frozen=True)
+class ExperimentConfig:
+    """Root configuration. One object carries everything a run depends on."""
+
+    name: str = "default"
+    seeds: tuple[int, ...] = (0, 1, 2, 3, 4)
+    paths: PathConfig = field(default_factory=PathConfig.default)
+    ai4i: AI4ISchema = field(default_factory=AI4ISchema)
+    cmapss: CMAPSSSchema = field(default_factory=CMAPSSSchema)
+    determinism: DeterminismConfig = field(default_factory=DeterminismConfig)
+    eda: EDAConfig = field(default_factory=EDAConfig)
+    cv: CVConfig = field(default_factory=CVConfig)
+    metrics: MetricConfig = field(default_factory=MetricConfig)
+    cost: CostConfig = field(default_factory=CostConfig)
+
+    def __post_init__(self) -> None:
+        self.determinism.validate_against(self.ai4i.mode_flags)
+
+    def with_(self, **overrides: Any) -> ExperimentConfig:
+        """Return a copy with fields replaced. Configs are never mutated."""
+        return replace(self, **overrides)
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-ready form for the results record."""
+
+        def encode(value: Any) -> Any:
+            if isinstance(value, Path):
+                return str(value)
+            if isinstance(value, dict):
+                return {k: encode(v) for k, v in value.items()}
+            if isinstance(value, (list, tuple)):
+                return [encode(v) for v in value]
+            return value
+
+        return encode(asdict(self))
+
+    def to_json(self, indent: int = 2) -> str:
+        return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
+
+
+def default_config() -> ExperimentConfig:
+    """The configuration that reproduces the committed EDA results."""
+    return ExperimentConfig()

@@ -22,7 +22,10 @@ constants, because it needs inputs this module has no business knowing about.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import average_precision_score, brier_score_loss, confusion_matrix
+
+from ..config import MetricConfig
 
 # Keys produced by `classification_metrics`, in report order.
 METRIC_NAMES = (
@@ -164,7 +167,7 @@ def f_beta(y_true, y_pred, beta: float = 2.0) -> float:
 # ---------------------------------------------------------------------------
 # Aggregate
 # ---------------------------------------------------------------------------
-def classification_metrics(y_true, y_prob, threshold: float) -> dict[str, float]:
+def classification_metrics(y_true, y_prob, threshold: float, beta: float = 2.0) -> dict[str, float]:
     """Every metric at one operating point, plus the counts behind them.
 
     `threshold` is required and has no default. 0.5 is meaningless at a 3.39%
@@ -186,12 +189,50 @@ def classification_metrics(y_true, y_prob, threshold: float) -> dict[str, float]
         "pr_auc": pr_auc(y_true, y_prob),
         "recall": recall(y_true, y_pred),
         "precision": precision(y_true, y_pred),
-        "f2": f_beta(y_true, y_pred, beta=2.0),
+        "f2": f_beta(y_true, y_pred, beta=beta),
         "brier": brier(y_true, y_prob),
         "threshold": float(threshold),
+        "beta": float(beta),
         "base_rate": float(y_true.mean()),
         "n": int(y_true.size),
         "n_positive": int(y_true.sum()),
     }
     out.update({k: float(v) for k, v in counts.items()})
     return out
+
+
+class MetricSuite:
+    """The metric primitives bound to one `MetricConfig`.
+
+    The primitives above stay free functions on purpose: they are pure maths over
+    arrays with no state, and wrapping them in objects would add indirection
+    without adding anything. What genuinely needs to be configurable is the
+    *settings* -- beta, and the threshold grid the cost curve is built over --
+    so those live in a config object and this class composes the functions
+    against it.
+
+    Carrying the config also means a run can record exactly which beta and which
+    grid produced its numbers.
+    """
+
+    def __init__(self, config: MetricConfig | None = None) -> None:
+        self.config = config or MetricConfig()
+
+    def evaluate(self, y_true, y_prob, threshold: float | None = None) -> dict[str, float]:
+        """Metrics at one operating point.
+
+        `threshold` falls back to `config.report_threshold` -- an explicit,
+        recorded setting rather than a hidden literal.
+        """
+        t = self.config.report_threshold if threshold is None else threshold
+        return classification_metrics(y_true, y_prob, threshold=t, beta=self.config.beta)
+
+    def sweep(self, y_true, y_prob) -> pd.DataFrame:
+        """Metrics across the whole threshold grid, one row per threshold.
+
+        This is the table the cost curve is built from, and the evidence for
+        (or against) the claim that threshold moves outcomes more than algorithm
+        choice does.
+        """
+        rows = [self.evaluate(y_true, y_prob, threshold=t) for t in self.config.thresholds]
+        return pd.DataFrame(rows)
