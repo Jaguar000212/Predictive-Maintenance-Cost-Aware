@@ -1,0 +1,23 @@
+# Line-ending policy: LF in the repository and in the working tree, on every
+# machine. Without this, git's per-machine core.autocrlf setting decides, and two
+# developers with different settings produce whole-file diffs that bury the real
+# change. Set before the second developer starts, so no renormalisation churn.
+* text=auto eol=lf
+
+# Binary: never normalise, never attempt a text diff. Listed ahead of need --
+# figures land in reports/ and model artifacts in results/ from Layer 1 onward.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.pdf    binary
+*.xlsx   binary
+*.pkl    binary
+*.joblib binary
+*.npy    binary
+*.npz    binary
+*.parquet binary
+
+# Notebooks diff badly and merge worse. Keep them out of the merge path; the
+# interface contract says notebooks read from results/ and never compute a
+# final number, so a conflict there is never worth resolving by hand.
+*.ipynb  -diff merge=binary
