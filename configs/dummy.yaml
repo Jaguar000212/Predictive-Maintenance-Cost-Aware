@@ -1,0 +1,26 @@
+# Week 1 gate: harness validation, not a model.
+#
+# A constant-negative baseline must produce recall 0 and PR-AUC = Brier = the
+# positive base rate (0.0339). Anything else means the harness is broken rather
+# than the model being poor. No real model is trained until this passes.
+#
+# Run:  python scripts/run_experiment.py configs/dummy.yaml
+
+name: dummy_constant_negative
+estimator: dummy_constant_negative
+
+seeds: [0, 1, 2, 3, 4]
+
+cv:
+  n_splits: 5
+  n_repeats: 5
+  random_state: 42
+  shuffle: true
+
+metrics:
+  beta: 2.0
+  report_threshold: 0.5
+
+# Cost constants stay unset. The missed-failure to false-alarm ratio is a
+# pending decision, and computing a cost figure before it is chosen and
+# justified would let the number drive the choice rather than the reverse.

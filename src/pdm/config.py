@@ -18,9 +18,12 @@ history stops matching the code.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field, replace
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, Literal
+
+import yaml
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -374,6 +377,9 @@ class ExperimentConfig:
     """Root configuration. One object carries everything a run depends on."""
 
     name: str = "default"
+    # Registry key for the estimator under test. A string rather than an object
+    # so the choice is recorded verbatim in the results JSON.
+    estimator: str = "dummy_constant_negative"
     seeds: tuple[int, ...] = (0, 1, 2, 3, 4)
     paths: PathConfig = field(default_factory=PathConfig.default)
     ai4i: AI4ISchema = field(default_factory=AI4ISchema)
@@ -407,6 +413,85 @@ class ExperimentConfig:
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
+
+    def to_yaml(self) -> str:
+        return yaml.safe_dump(self.to_dict(), sort_keys=True, default_flow_style=False)
+
+    # -- construction from files -------------------------------------------
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> ExperimentConfig:
+        """Build from a plain mapping, rejecting anything unrecognised.
+
+        Unknown keys raise rather than being ignored. A typo in a config file
+        that silently falls back to the default is precisely the failure this
+        project cannot afford: the run would be recorded under a name implying
+        settings it never used.
+        """
+        payload = dict(payload)
+        sections = {
+            "paths": PathConfig,
+            "ai4i": AI4ISchema,
+            "cmapss": CMAPSSSchema,
+            "determinism": DeterminismConfig,
+            "eda": EDAConfig,
+            "cv": CVConfig,
+            "metrics": MetricConfig,
+            "cost": CostConfig,
+        }
+        scalars = {"name", "estimator", "seeds"}
+
+        unknown = set(payload) - set(sections) - scalars
+        if unknown:
+            raise ValueError(
+                f"unknown top-level settings {sorted(unknown)}; " f"valid: {sorted(set(sections) | scalars)}"
+            )
+
+        kwargs: dict[str, Any] = {}
+        for key in ("name", "estimator"):
+            if key in payload:
+                kwargs[key] = payload[key]
+        if "seeds" in payload:
+            kwargs["seeds"] = tuple(payload["seeds"])
+
+        for key, dc_cls in sections.items():
+            if key in payload and payload[key] is not None:
+                kwargs[key] = _section_from_mapping(dc_cls, payload[key])
+
+        return cls(**kwargs)
+
+    @classmethod
+    def from_yaml(cls, path: Path | str) -> ExperimentConfig:
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"config file not found: {path}")
+        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return cls.from_dict(payload)
+
+
+def _section_from_mapping(dc_cls: type, payload: Mapping[str, Any]) -> Any:
+    """Build one config dataclass, coercing YAML types and rejecting typos.
+
+    YAML has no tuple type, so sequences arrive as lists and are converted --
+    the dataclasses use tuples so they stay immutable and hashable.
+    """
+    field_names = {f.name for f in fields(dc_cls)}
+    unknown = set(payload) - field_names
+    if unknown:
+        raise ValueError(
+            f"{dc_cls.__name__}: unknown settings {sorted(unknown)}; valid: {sorted(field_names)}"
+        )
+
+    kwargs: dict[str, Any] = {}
+    for key, value in payload.items():
+        if isinstance(value, list):
+            value = tuple(tuple(v) if isinstance(v, list) else v for v in value)
+        if dc_cls is PathConfig and value is not None:
+            value = Path(value)
+        kwargs[key] = value
+
+    if dc_cls is PathConfig:
+        return replace(PathConfig.default(), **kwargs)
+    return dc_cls(**kwargs)
 
 
 def default_config() -> ExperimentConfig:

@@ -150,15 +150,19 @@ conda run -n AI python scripts/run_eda.py
 |---|---|
 | One-time setup | `conda run -n AI python -m pip install -e .` |
 | EDA report | `conda run -n AI python scripts/run_eda.py` |
-| EDA, print only | `conda run -n AI python scripts/run_eda.py --no-write` |
-| Format (line length 110) | `conda run -n AI python -m black .` |
+| Run an experiment | `conda run -n AI python scripts/run_experiment.py configs/dummy.yaml` |
+| Experiment, no results file | `... run_experiment.py configs/dummy.yaml --no-write` |
+| Tests | `conda run -n AI python -m pytest tests/ -q` |
+| One test | `conda run -n AI python -m pytest tests/test_cv.py::test_folds_are_stratified -q` |
+| Format (line length 110) | `conda run -n AI python -m black src scripts tests` |
+| Lint | `conda run -n AI python -m ruff check src scripts tests` |
 
 The editable install is **required**, not a convenience: without it `from pdm import ...`
 resolves only from `scripts/`, and notebooks or ad-hoc scripts fail.
 
-**No test suite exists yet, and `pytest` is not installed.** Add it with
-`conda install -n AI -c conda-forge pytest` before the Week 1 gate. `ruff` is also
-absent despite being configured in `pyproject.toml`; `black` is installed.
+**Commit before any run whose output reaches the report.** `ResultsWriter` warns when
+a run is recorded from a dirty tree, because the recorded SHA then names a commit that
+does not contain the code that ran.
 
 ### Environment traps
 
@@ -243,13 +247,14 @@ src/pdm/
   data/       ai4i.py, cmapss.py
   features/   physics.py (temp_diff, power_w, wear_strain), pipeline.py
   models/
+    registry.py                 name -> estimator factory; configs address models by string
     mle/      censored_weibull.py            Layer 1
     bayes/    gnb.py, bayes_logreg.py        Layer 2
     trees/    tree.py, forest.py, boosting.py, voting.py   Layer 3
-  eval/       metrics.py, cv.py, calibration.py
+  eval/       metrics.py, cv.py, results.py, calibration.py
   decision/   cost_model.py, policy_sim.py   Layer 4
   eda.py
-scripts/      run_eda.py, run_dummy.py, run_experiment.py
+scripts/      run_eda.py, run_experiment.py
 tests/
 configs/      one YAML per experiment          committed
 results/      one JSON per run                 committed — this is the provenance record
@@ -283,7 +288,7 @@ No figure or table in the report may come from an unrecorded run.
 
 | Gate | Criterion |
 |---|---|
-| **Week 1** | One command runs a dummy model end to end and writes a results JSON. **No real model is trained before this passes.** |
+| **Week 1** | ✅ **PASSED.** `run_experiment.py configs/dummy.yaml` runs the constant-negative baseline end to end and writes a results JSON. Measured: recall 0, PR-AUC 0.0339, Brier 0.0339 — all at the base rate, as predicted. Asserted permanently in `tests/test_experiment.py`. |
 | Week 2 | Weibull validated against simulated censoring; reliability diagrams exist |
 | Week 3 | Model comparison table populated with CV mean ± SD |
 | Week 4 | Cost curves and policy table complete. **Code freeze day 24.** |

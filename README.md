@@ -156,14 +156,38 @@ than the CV spread. One caveat that belongs in the write-up: repeated k-fold fol
 reuse rows, so the standard deviation across fits is a descriptive spread, not a
 standard error. Treat the rule as a decision procedure, not a significance test.
 
+## Running an experiment
+
+Experiments are YAML files in `configs/`, one per experiment:
+
+```bash
+conda run -n AI python scripts/run_experiment.py configs/dummy.yaml
+```
+
+Each run writes one JSON to `results/` carrying the full config, seed list, git
+SHA, library versions, and metrics. Those files are committed — they are the
+audit trail behind the rule that no figure may come from an unrecorded run. A
+run recorded from a dirty working tree is flagged `reproducible: false` and
+warns, because the SHA then names a commit that does not contain the code that
+ran.
+
+Unknown keys in a config are rejected rather than ignored. A silently-dropped
+typo would record a run under settings it never used.
+
 ## Status
 
-EDA complete. Evaluation harness complete: metrics, cross-validation, and the
-model-comparison rule. No models trained yet.
+**Week 1 gate passed.** The constant-negative baseline runs end to end and writes
+a results JSON. Measured over 25 folds: recall 0, PR-AUC 0.0339, Brier 0.0339 —
+all at the positive base rate, exactly as predicted before running. That number
+is now a permanent regression test; if it moves, the harness is broken rather
+than the model being poor.
 
-81 tests cover the config guards, the loader corruption paths (against synthetic
-fixtures, not the real data), every metric against hand-computed values, and the
-cross-validation leakage guarantees.
+EDA complete. Evaluation harness complete: metrics, cross-validation, the
+model-comparison rule, and run recording. No real model trained yet.
+
+109 tests cover the config guards, the loader corruption paths (against synthetic
+fixtures, not the real data), every metric against hand-computed values, the
+cross-validation leakage guarantees, and the gate itself.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
 Rationale for each decision is in `docs/DECISIONS.md`.
