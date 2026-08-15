@@ -1,0 +1,18 @@
+# Core data stack
+numpy>=1.26,<3
+pandas>=2.1,<3
+scipy>=1.11
+
+# Modelling (locked decisions: class weights not SMOTE; no Gaussian Processes)
+scikit-learn>=1.4
+xgboost>=2.0
+lightgbm>=4.1
+
+# Censored lifetime estimation for C-MAPSS (Weibull AFT / Kaplan-Meier)
+lifelines>=0.28
+
+# Plotting
+matplotlib>=3.8
+
+# Optional: only needed for the SMOTE calibration ablation
+imbalanced-learn>=0.12
