@@ -1,26 +1,118 @@
 # Predictive-Maintenance-Cost-Aware
-Cost-aware evaluation of probabilistic and ensemble models for industrial predictive maintenance — do complex models actually save money?
+
+Cost-aware evaluation of probabilistic and ensemble models for industrial
+predictive maintenance — do complex models actually save money?
 
 ## Question
 
-On near-deterministic failure boundaries, does algorithmic complexity
-buy anything once models are evaluated on expected cost rather than
-accuracy?
+On near-deterministic failure boundaries, does algorithmic complexity buy
+anything once models are evaluated on expected cost rather than accuracy?
 
 ## Hypothesis
 
-Once physics-derived features are engineered, tree-based models will
-converge to near-identical performance, and the choice of alarm
-threshold will affect total cost more than the choice of algorithm.
+Once physics-derived features are engineered, tree-based models will converge to
+near-identical performance, and the choice of alarm threshold will affect total
+cost more than the choice of algorithm.
 
-Falsified if: boosting beats a depth-limited decision tree by more
-than the cross-validation spread.
+**Falsified if** boosting beats a depth-limited decision tree by more than the
+cross-validation spread; or any model exceeds the computed ceiling without an
+identifiable leakage path; or algorithm choice moves cost more than threshold
+choice does.
+
+A negative result is a valid finding. Models are not tuned toward the hypothesis.
 
 ## Data
 
-- AI4I 2020 (UCI) — classification
-- NASA C-MAPSS FD001 — lifetime estimation
+| Dataset | Role | Size |
+|---|---|---|
+| AI4I 2020 (UCI 601) | Binary classification | 10,000 rows, 339 failures (3.39%) |
+| NASA C-MAPSS FD001 | Censored lifetime estimation | 100 train + 100 test trajectories |
+
+Raw data is not committed. Restore it under `data/raw/AI4I_2020/` and
+`data/raw/CMAPSS_2008/` before running anything.
+
+## Findings so far — EDA
+
+**AI4I has two recall ceilings, not one.**
+
+| Definition | Recoverable | Ceiling |
+|---|---|---|
+| Strict — HDF, PWF, OSF (exact threshold rules) | 287 / 339 | **84.66%** |
+| Extended — plus TWF | 330 / 339 | **97.35%** |
+
+The 15.34% the strict ceiling leaves behind is *not* mostly randomness, which was
+the initial assumption. It decomposes as:
+
+- **12.68%** TWF-only — the tool-wear threshold is drawn from U[200, 240] min, so
+  high wear is a visible risk signal even though which tool fails is not
+- **0.00%** RNF-only — the random failure mode explains **no** failure uniquely
+- **2.65%** unexplained — 9 rows labelled positive with no mode flag, genuinely
+  irreducible
+
+So the achievable ceiling is a **range**, and which end to target is a cost
+decision, not a modelling one. Benchmarking against a single fixed 84.66% would
+make a correct model look anomalous.
+
+Also measured: 18 rows carry a mode flag but a negative label — all of them
+RNF-only, and since RNF is independent of every feature, they are
+indistinguishable from ordinary negatives and do not cap precision. 24 rows trip
+two or more modes, which is why the ceiling is computed over distinct rows rather
+than summed flags.
+
+**C-MAPSS FD001 lifetimes** — mean 206.31 cycles, SD 46.34, range 128–362 over the
+100 complete training trajectories. Test trajectories are truncated at 37.2% of
+life on average (worst case 79.3%), so censoring handling is not a refinement
+here. Seven columns are constant, two of them only to floating-point tolerance.
+
+Full report: `reports/eda/eda_report.txt` (regenerate with the command below).
+
+## Architecture
+
+| Layer | Technique | Produces |
+|---|---|---|
+| 1 | Censored Weibull MLE (explicit likelihood) | Age-based maintenance interval |
+| 2 | Gaussian NB + Bayesian logistic regression | Calibrated probabilities |
+| 3 | Decision tree, Random Forest, AdaBoost, GB, XGBoost, Voting | Discriminative predictions |
+| 4 | Cost model + threshold optimisation | Cost per 1000h per policy |
+
+Layer 1 uses C-MAPSS; Layers 2–3 use AI4I. They converge only at Layer 4. No model
+or parameter transfers between datasets.
+
+## Setup
+
+Requires the conda env `AI` (Python 3.11).
+
+```bash
+conda install -n AI -c conda-forge --file requirements.txt
+```
+
+```bash
+conda run -n AI python -m pip install -e .
+```
+
+## Usage
+
+```bash
+conda run -n AI python scripts/run_eda.py
+```
+
+```bash
+conda run -n AI python -m pytest tests/ -q
+```
+
+Modules under `src/pdm/` use relative imports and cannot be executed directly —
+run the entry points in `scripts/` instead.
+
+## Metrics
+
+Accuracy is **not implemented**, deliberately: a constant-negative model scores
+96.61% on this data. Evaluation uses PR-AUC, recall, F2, Brier score, and cost per
+1000h. PR-AUC is average precision, not trapezoidal area — the two differ and only
+one is intended.
 
 ## Status
 
-Design phase.
+EDA complete; evaluation harness in progress. No models trained yet.
+
+Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
+Rationale for each decision is in `docs/DECISIONS.md`.
