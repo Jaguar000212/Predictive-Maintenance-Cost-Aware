@@ -287,6 +287,29 @@ class EDAConfig:
     variance_preview_rows: int = 12
 
 
+@dataclass(frozen=True)
+class WeibullMLEConfig:
+    """Optimiser settings for the censored Weibull MLE (Layer 1).
+
+    The likelihood is written by hand in `models/mle/censored_weibull.py`;
+    these settings control how `scipy.optimize` searches it. They belong here
+    rather than as literals in that module because a tight iteration cap can
+    return an unconverged fit that still looks like a plausible answer --
+    `CensoredWeibullMLE.fit` raises rather than accepting one, but the
+    tolerance that decides "converged" is itself a setting, not a given.
+    """
+
+    optimizer_method: str = "L-BFGS-B"
+    max_iterations: int = 500
+    tolerance: float = 1e-8
+
+    def __post_init__(self) -> None:
+        if self.max_iterations < 1:
+            raise ValueError(f"max_iterations must be >= 1, got {self.max_iterations}")
+        if self.tolerance <= 0:
+            raise ValueError(f"tolerance must be positive, got {self.tolerance}")
+
+
 # ---------------------------------------------------------------------------
 # Experiment settings
 # ---------------------------------------------------------------------------

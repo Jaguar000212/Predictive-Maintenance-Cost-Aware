@@ -193,6 +193,34 @@ raises and PR-AUC can still look fine — it just stops being watts, and the
 PWF band stops lining up with a single split. `tests/test_physics.py` pins
 the formula against a hand-computed value for that reason.
 
+## Layer 1 — censored Weibull MLE
+
+`src/pdm/models/mle/censored_weibull.py` fits a Weibull(β, η) to C-MAPSS engine
+lifetimes by maximum likelihood, with the log-likelihood written out by hand
+(no survival-analysis package) — a failure contributes the density, a censored
+engine contributes the survival function, and conflating the two silently
+biases every fitted lifetime short.
+
+`CensoredWeibullMLE.fit(durations, events)` raises rather than returning an
+unconverged result; `predict_distribution()` returns an immutable
+`WeibullDistribution` exposing `survival`, `hazard`, and `quantile` — the last
+one is the age-based maintenance interval this layer produces (the age by
+which a given fraction of units are expected to have failed).
+
+**Verified against an independent oracle.** On the 100 real train lifetimes
+(uncensored — every train engine runs to failure), this estimator gives
+β = 4.4087, η = 225.03, matching `scipy.stats.weibull_min.fit` to 4 decimal
+places. An earlier method-of-moments prediction (β ≈ 4.9–5.0) turned out to be
+the wrong number to check against, not evidence of a bug: moment-matching and
+maximum likelihood are different estimation principles, and at n=100 they can
+diverge by double digits in percentage terms even on the same data. Detail in
+`CLAUDE.md`.
+
+Parameter recovery under simulated censoring is tested directly: fit against
+data censored at a known cutoff, and check the estimator recovers the
+*generating* parameters — not the shorter lifetime a naive fit (treating every
+censored row as if it failed at the cutoff) would produce.
+
 ## Status
 
 **Week 1 gate passed.** The constant-negative baseline runs end to end and writes
@@ -202,12 +230,15 @@ is now a permanent regression test; if it moves, the harness is broken rather
 than the model being poor.
 
 EDA complete. Evaluation harness complete: metrics, cross-validation, the
-model-comparison rule, and run recording. Physics features built. No real
-model trained yet — that starts Week 2.
+model-comparison rule, and run recording. Physics features and the Layer 1
+Weibull MLE are built. Layers 2 and 3 (calibrated probabilities, tree models)
+are next.
 
-119 tests cover the config guards, the loader corruption paths (against synthetic
+137 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the
-cross-validation leakage guarantees, the physics formulas, and the gate itself.
+cross-validation leakage guarantees, the physics formulas, the Weibull MLE
+(including recovery under simulated censoring and agreement with an
+independent oracle), and the gate itself.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
 Rationale for each decision is in `docs/DECISIONS.md`.

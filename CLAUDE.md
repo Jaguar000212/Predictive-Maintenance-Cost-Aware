@@ -89,9 +89,19 @@ Anything above 97.35% is a leakage path. Investigate, don't celebrate.
 - **7 constant columns**: sensor_1, 5, 10, 16, 18, 19, op_setting_3. Two are
   float-noise constant (3e-18, 5e-15) — use a tolerance, not `std == 0`.
 
-**Predicted Weibull fit** (CV = 0.225): shape β ≈ 4.9–5.0, scale η ≈ 224.
-Recorded before fitting. A materially different result means the implementation
-is wrong, not that the data is surprising.
+**Verified Weibull fit** (uncensored MLE on the 100 train lifetimes): shape
+β = 4.4087, scale η = 225.03. Confirmed against `scipy.stats.weibull_min.fit`
+as an independent oracle to 4 decimal places — this is the number any correct
+implementation should reproduce.
+
+An earlier method-of-moments prediction here said β ≈ 4.9–5.0. That number was
+**not wrong because of a bug** — it's wrong because moment-matching (solve for
+β from the sample coefficient of variation alone) and maximum likelihood are
+different estimation principles that need not agree. MoM matches the sample
+CV (0.2246) by construction; the true MLE fit implies a different CV (0.2569)
+because MLE is shaped by the full likelihood, not two summary statistics. At
+n=100 they diverged by ~14%. Lesson for next time: a moments-based number is a
+sanity check on convergence, not a ground truth to fit toward.
 
 **Censoring — critical.** `RUL_FD001.txt` supplies true remaining life, so the
 test set is *de-censored*. Fitting to true durations and calling it a censored fit
