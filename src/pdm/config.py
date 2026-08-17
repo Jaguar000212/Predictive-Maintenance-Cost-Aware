@@ -115,6 +115,20 @@ class AI4ISchema:
     categorical_features: tuple[str, ...] = ("type",)
     identifier_columns: tuple[str, ...] = ("udi", "product_id")
 
+    # Named single-column references for the physics feature formulas
+    # (`features/physics.py`). Kept as explicit fields rather than positional
+    # indices into `numeric_features`, so renaming a raw column cannot silently
+    # point a formula at the wrong sensor.
+    air_temp_col: str = "air_temp_k"
+    process_temp_col: str = "process_temp_k"
+    rot_speed_col: str = "rot_speed_rpm"
+    torque_col: str = "torque_nm"
+    tool_wear_col: str = "tool_wear_min"
+
+    # Columns `PhysicsFeatures` adds. Recorded here, not just in the
+    # transformer, so a results JSON shows which engineered columns a run used.
+    engineered_features: tuple[str, ...] = ("temp_diff", "power_w", "wear_strain")
+
     @property
     def column_map(self) -> dict[str, str]:
         return dict(self.column_pairs)

@@ -174,6 +174,25 @@ ran.
 Unknown keys in a config are rejected rather than ignored. A silently-dropped
 typo would record a run under settings it never used.
 
+## Features
+
+`src/pdm/features/physics.py` derives three columns the raw sensors don't carry
+on their own, each one turning a failure-mode rule into an axis-aligned cut:
+
+| Feature | Formula | Recovers |
+|---|---|---|
+| `temp_diff` | `process_temp − air_temp` | HDF boundary (8.6 K) |
+| `power_w` | `torque × (2π × rpm / 60)` | PWF band (3500–9000 W) |
+| `wear_strain` | `tool_wear × torque` | OSF limits (tier-dependent on `type`) |
+
+The transformer is stateless — every output is a per-row function of that
+row's own inputs, so there is no train-derived statistic for a CV fold
+boundary to leak through. The `2π/60` conversion is load-bearing, not
+cosmetic: skip it and `power_w` is still monotonic in true power, so nothing
+raises and PR-AUC can still look fine — it just stops being watts, and the
+PWF band stops lining up with a single split. `tests/test_physics.py` pins
+the formula against a hand-computed value for that reason.
+
 ## Status
 
 **Week 1 gate passed.** The constant-negative baseline runs end to end and writes
@@ -183,11 +202,12 @@ is now a permanent regression test; if it moves, the harness is broken rather
 than the model being poor.
 
 EDA complete. Evaluation harness complete: metrics, cross-validation, the
-model-comparison rule, and run recording. No real model trained yet.
+model-comparison rule, and run recording. Physics features built. No real
+model trained yet — that starts Week 2.
 
-109 tests cover the config guards, the loader corruption paths (against synthetic
+119 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the
-cross-validation leakage guarantees, and the gate itself.
+cross-validation leakage guarantees, the physics formulas, and the gate itself.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
 Rationale for each decision is in `docs/DECISIONS.md`.
