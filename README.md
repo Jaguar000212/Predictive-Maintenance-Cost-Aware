@@ -262,6 +262,33 @@ Needs scaled inputs (unlike trees): an L2 penalty and one shared prior
 variance `C` only mean the same thing across features that are on comparable
 scales, and `wear_strain` (~10⁵) and `temp_diff` (~10) are not.
 
+## Calibration diagnostics
+
+`src/pdm/eval/calibration.py` provides reliability curves and a Brier-score
+decomposition (Murphy 1973): `reliability` (calibration error), `resolution`
+(ability to separate cases at all), `uncertainty` (fixed by the base rate).
+
+One identity is exact and one is not, and the module is explicit about which
+is which: `reliability - resolution + uncertainty` reconstructs the score you
+get by replacing every prediction with its bucket's mean (`binned_brier`) —
+verified against an independent row-level recomputation in
+`tests/test_calibration.py` — not the raw per-row score `eval.metrics.brier`
+reports. The two converge as bucket count grows but are not the same number
+at any finite bucket count, and both are reported rather than conflated.
+
+Bucketing defaults to equal-*count* bins (`strategy="quantile"`), not
+equal-width: at AI4I's 3.39% base rate, equal-width bins leave almost the
+whole `[0, 1]` range empty and cram nearly every prediction into the first
+bucket or two.
+
+**Isolates exactly where GNB's calibration cost comes from.** Decomposing
+both Layer 2 models on a held-out split: resolution is nearly identical
+(GNB 0.00516 vs BLR 0.00547 — both separate failures from non-failures about
+equally well), but reliability differs by two orders of magnitude (GNB
+0.00600 vs BLR 0.00003). GNB's worse Brier score is not a ranking problem —
+it is calibration error, isolated precisely to the mechanism predicted before
+this was run: correlated features counted as independent evidence.
+
 ## Status
 
 **Week 1 gate passed.** The constant-negative baseline runs end to end and writes
@@ -271,16 +298,19 @@ is now a permanent regression test; if it moves, the harness is broken rather
 than the model being poor.
 
 EDA complete. Evaluation harness complete: metrics, cross-validation, the
-model-comparison rule, and run recording. Physics features, the Layer 1
-Weibull MLE, and Layer 2 (Gaussian NB, Bayesian logistic regression) are
-built. Layer 3 (tree models) is next.
+model-comparison rule, calibration diagnostics, and run recording. Physics
+features, the Layer 1 Weibull MLE, and Layer 2 (Gaussian NB, Bayesian
+logistic regression) are built. Layer 3 (tree models) is next — the last
+piece before Week 2's gate (Weibull validated, reliability diagrams exist)
+closes.
 
-151 tests cover the config guards, the loader corruption paths (against synthetic
+164 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the
 cross-validation leakage guarantees, the physics formulas, the Weibull MLE
 (including recovery under simulated censoring and agreement with an
 independent oracle), the Layer 2 likelihood/posterior formulas (against hand
 recomputations, including the Laplace covariance and its zero-variance limit),
+the Brier decomposition (against an independent row-level recomputation),
 and the gate itself.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.

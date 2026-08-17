@@ -347,6 +347,27 @@ class BayesianConfig:
             raise ValueError(f"cnb_alpha must be positive, got {self.cnb_alpha}")
 
 
+@dataclass(frozen=True)
+class CalibrationConfig:
+    """Settings for reliability curves and the Brier decomposition.
+
+    `strategy="quantile"` (equal-count bins) is the default rather than
+    equal-width bins, and deliberately so: at AI4I's 3.39% base rate, most
+    predicted probabilities cluster near zero, so equal-width bins leave
+    nearly every point in the first one or two buckets and the rest empty --
+    a reliability curve with almost no information in it. Equal-count bins
+    keep every bucket populated at the cost of the bucket edges being
+    data-dependent rather than round numbers.
+    """
+
+    n_bins: int = 10
+    strategy: Literal["uniform", "quantile"] = "quantile"
+
+    def __post_init__(self) -> None:
+        if self.n_bins < 1:
+            raise ValueError(f"n_bins must be >= 1, got {self.n_bins}")
+
+
 # ---------------------------------------------------------------------------
 # Experiment settings
 # ---------------------------------------------------------------------------
