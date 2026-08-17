@@ -310,6 +310,43 @@ class WeibullMLEConfig:
             raise ValueError(f"tolerance must be positive, got {self.tolerance}")
 
 
+@dataclass(frozen=True)
+class BayesianConfig:
+    """Settings for Layer 2 (Gaussian Naive Bayes, Bayesian logistic regression).
+
+    `use_class_weight_balanced` deliberately defaults to False -- unlike Layer
+    3's tree models, which follow CLAUDE.md's locked `class_weight='balanced'`
+    rule. Layer 2 exists to produce CALIBRATED probabilities (Brier score is a
+    locked primary metric specifically because it catches miscalibration).
+    Reweighting toward a 50/50 prior would push every probability away from
+    the true ~3.4% base rate by the same mechanism CLAUDE.md rejects SMOTE
+    for, just via the loss function instead of resampling. If this is ever
+    flipped to True, note it in docs/DECISIONS.md -- it changes what a
+    reported probability means.
+
+    `logreg_C` is not just a regularisation knob here: for the Bayesian
+    logistic regression's Laplace approximation, `C` *is* the prior variance
+    on each weight (see `models/bayes/bayes_logreg.py`), so changing it changes
+    the posterior, not only the MAP point.
+    """
+
+    use_class_weight_balanced: bool = False
+    logreg_C: float = 1.0
+    logreg_max_iter: int = 1000
+    gnb_var_smoothing: float = 1e-9
+    cnb_alpha: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.logreg_C <= 0:
+            raise ValueError(f"logreg_C must be positive, got {self.logreg_C}")
+        if self.logreg_max_iter < 1:
+            raise ValueError(f"logreg_max_iter must be >= 1, got {self.logreg_max_iter}")
+        if self.gnb_var_smoothing <= 0:
+            raise ValueError(f"gnb_var_smoothing must be positive, got {self.gnb_var_smoothing}")
+        if self.cnb_alpha <= 0:
+            raise ValueError(f"cnb_alpha must be positive, got {self.cnb_alpha}")
+
+
 # ---------------------------------------------------------------------------
 # Experiment settings
 # ---------------------------------------------------------------------------

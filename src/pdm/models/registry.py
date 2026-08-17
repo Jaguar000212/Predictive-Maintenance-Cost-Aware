@@ -19,9 +19,12 @@ from typing import Any
 from sklearn.compose import ColumnTransformer
 from sklearn.dummy import DummyClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from ..config import AI4ISchema
+from ..config import AI4ISchema, BayesianConfig
+from ..features.physics import PhysicsFeatures
+from .bayes.bayes_logreg import BayesianLogisticRegression
+from .bayes.gnb import MixedNaiveBayes
 
 EstimatorFactory = Callable[[], Any]
 Builder = Callable[[AI4ISchema, int], EstimatorFactory]
@@ -75,8 +78,45 @@ def preprocessor(schema: AI4ISchema) -> ColumnTransformer:
     )
 
 
+def engineered_preprocessor(schema: AI4ISchema) -> ColumnTransformer:
+    """Preprocessing for a model consuming physics features.
+
+    Same as `preprocessor()`, plus `schema.engineered_features` in the
+    passthrough list. Placing `PhysicsFeatures` ahead of `preprocessor()`
+    alone is not enough -- the plain `ColumnTransformer`'s `remainder="drop"`
+    silently discards `temp_diff`/`power_w`/`wear_strain` because they are not
+    in its column list. This is that list, corrected.
+    """
+    return ColumnTransformer(
+        [
+            ("categorical", OneHotEncoder(handle_unknown="ignore"), list(schema.categorical_features)),
+            ("numeric", "passthrough", list(schema.numeric_features) + list(schema.engineered_features)),
+        ],
+        remainder="drop",
+    )
+
+
 def _pipeline(schema: AI4ISchema, classifier: Any) -> EstimatorFactory:
     return lambda: Pipeline([("preprocess", preprocessor(schema)), ("classifier", classifier)])
+
+
+def _physics_pipeline(schema: AI4ISchema, classifier: Any, scale: bool = False) -> EstimatorFactory:
+    """Pipeline for a model that needs the physics features.
+
+    `scale=True` adds a `StandardScaler` after preprocessing -- needed for
+    regularised linear models (an L2 penalty only means the same thing across
+    features on comparable scales) but deliberately not used for trees, which
+    split on raw thresholds and do not need it. Fit inside this pipeline, so
+    `CrossValidator` refits it on train-fold rows only for every fold.
+    """
+    steps: list[tuple[str, Any]] = [
+        ("physics", PhysicsFeatures(schema)),
+        ("preprocess", engineered_preprocessor(schema)),
+    ]
+    if scale:
+        steps.append(("scale", StandardScaler()))
+    steps.append(("classifier", classifier))
+    return lambda: Pipeline(steps)
 
 
 @register("dummy_constant_negative")
@@ -109,3 +149,31 @@ def _stratified(schema: AI4ISchema, seed: int) -> EstimatorFactory:
     measured rather than being accidentally zero.
     """
     return _pipeline(schema, DummyClassifier(strategy="stratified", random_state=seed))
+
+
+@register("gnb")
+def _gaussian_nb(schema: AI4ISchema, seed: int) -> EstimatorFactory:
+    """Layer 2: Gaussian + categorical Naive Bayes. See `models/bayes/gnb.py`.
+
+    Bypasses `engineered_preprocessor` deliberately: `MixedNaiveBayes` needs
+    `type` as a named category, not one-hot columns, and reads the numeric and
+    physics columns by name from the DataFrame `PhysicsFeatures` produces.
+    """
+    return lambda: Pipeline(
+        [
+            ("physics", PhysicsFeatures(schema)),
+            ("classifier", MixedNaiveBayes(schema)),
+        ]
+    )
+
+
+@register("bayes_logreg")
+def _bayes_logreg(schema: AI4ISchema, seed: int) -> EstimatorFactory:
+    """Layer 2: Bayesian logistic regression via Laplace's approximation.
+
+    See `models/bayes/bayes_logreg.py`. Uses `_physics_pipeline(scale=True)`:
+    unlike the trees Layer 3 will add, an L2-regularised linear model needs
+    its inputs on comparable scales for one shared prior variance (`C`) to
+    mean the same thing across features.
+    """
+    return _physics_pipeline(schema, BayesianLogisticRegression(BayesianConfig()), scale=True)

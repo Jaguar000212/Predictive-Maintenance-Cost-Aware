@@ -221,6 +221,47 @@ data censored at a known cutoff, and check the estimator recovers the
 *generating* parameters — not the shorter lifetime a naive fit (treating every
 censored row as if it failed at the cutoff) would produce.
 
+## Layer 2 — Gaussian Naive Bayes and Bayesian logistic regression
+
+Both live under `src/pdm/models/bayes/` and both deliberately use AI4I's
+**true** class prior (~3.4%), not `class_weight='balanced'`. That rule is
+locked for Layer 3's discriminative trees, where the training loss needs
+rebalancing so the minority class isn't ignored; Layer 2 exists to produce
+*calibrated* probabilities (Brier score is a locked metric precisely because
+it catches miscalibration), and reweighting toward 50/50 would bias every
+probability away from the true base rate the way SMOTE does, just via the
+loss function instead of resampling.
+
+**`gnb.py` — `MixedNaiveBayes`.** Naive Bayes' independence assumption
+licenses modelling each feature with whatever distribution actually fits it:
+the five continuous/physics features as Gaussian (`GaussianNB`), and `type`
+(L/M/H) as a proper category (`CategoricalNB`) rather than one-hot columns
+fed into a Gaussian. The two log-likelihoods are combined by hand — exact
+under naive independence, not an approximation.
+
+Predictable and stated before running: `power_w` is an exact function of
+`torque_nm` and `rot_speed_rpm`, both of which stay in the feature matrix.
+Naive independence treats every feature as separate evidence, so a feature
+and its own derivation get double-counted, pushing probabilities further
+from 0.5 than the evidence supports. Measured on the real data: GNB's Brier
+score (0.0320) is worse than the logistic regression's (0.0231) at otherwise
+comparable settings — the calibration cost of that violated assumption,
+exactly as predicted before running either model.
+
+**`bayes_logreg.py` — `BayesianLogisticRegression`.** No MCMC (out of scope
+per CLAUDE.md) — Laplace's approximation instead: find the MAP weight vector
+by ordinary L2-regularised logistic regression (L2 strength `1/C` *is*
+Gaussian-prior MAP estimation), then approximate the posterior around it as
+Gaussian using the closed-form Hessian of a logistic log-likelihood. A new
+prediction integrates the sigmoid over that whole posterior via MacKay's
+probit approximation rather than evaluating it only at the MAP point — the
+"+ uncertainty" this layer exists to add. As posterior variance goes to zero
+this collapses back to a plain point-estimate prediction; tested directly.
+
+Needs scaled inputs (unlike trees): an L2 penalty and one shared prior
+variance `C` only mean the same thing across features that are on comparable
+scales, and `wear_strain` (~10⁵) and `temp_diff` (~10) are not.
+
 ## Status
 
 **Week 1 gate passed.** The constant-negative baseline runs end to end and writes
@@ -230,15 +271,17 @@ is now a permanent regression test; if it moves, the harness is broken rather
 than the model being poor.
 
 EDA complete. Evaluation harness complete: metrics, cross-validation, the
-model-comparison rule, and run recording. Physics features and the Layer 1
-Weibull MLE are built. Layers 2 and 3 (calibrated probabilities, tree models)
-are next.
+model-comparison rule, and run recording. Physics features, the Layer 1
+Weibull MLE, and Layer 2 (Gaussian NB, Bayesian logistic regression) are
+built. Layer 3 (tree models) is next.
 
-137 tests cover the config guards, the loader corruption paths (against synthetic
+151 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the
 cross-validation leakage guarantees, the physics formulas, the Weibull MLE
 (including recovery under simulated censoring and agreement with an
-independent oracle), and the gate itself.
+independent oracle), the Layer 2 likelihood/posterior formulas (against hand
+recomputations, including the Laplace covariance and its zero-variance limit),
+and the gate itself.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
 Rationale for each decision is in `docs/DECISIONS.md`.
