@@ -420,6 +420,59 @@ class TreeConfig:
             raise ValueError(f"forest_min_samples_leaf must be >= 1, got {self.forest_min_samples_leaf}")
 
 
+@dataclass(frozen=True)
+class BoostingConfig:
+    """Layer 3: AdaBoost, Gradient Boosting, and XGBoost settings.
+
+    Boosting fits weak learners sequentially, each one correcting the
+    previous ensemble's mistakes. Unlike Random Forest's independently
+    bagged trees, more estimators or a higher learning rate can genuinely
+    overfit here rather than just plateau -- so `n_estimators`/
+    `learning_rate` are fixed, stated choices, not left at whatever a
+    library's default happens to be, and deliberately matched across GB and
+    XGBoost so a result difference between them reflects the algorithms, not
+    mismatched hyperparameters. Not tuned via nested CV, for the same reason
+    the depth-limited tree's `max_depth` is not: this project measures
+    complexity against a fixed baseline, it does not optimise every knob.
+
+    Neither `AdaBoostClassifier` nor `GradientBoostingClassifier` accepts
+    `class_weight` -- a real gap in sklearn's API, not an oversight here.
+    `models/trees/boosting.py` applies CLAUDE.md's locked imbalance decision
+    to each anyway, by the mechanism each algorithm actually supports:
+    AdaBoost via `class_weight='balanced'` on its base stump, Gradient
+    Boosting via explicit per-fit `sample_weight`, and XGBoost via
+    `scale_pos_weight` -- which is literally what the locked decision names
+    it for. All three are computed from each fit call's own `y`, not the
+    whole dataset, so imbalance handling stays correctly scoped inside
+    whatever fold is being fit.
+    """
+
+    adaboost_n_estimators: int = 200
+    adaboost_learning_rate: float = 1.0
+    adaboost_stump_max_depth: int = 1
+
+    gb_n_estimators: int = 200
+    gb_learning_rate: float = 0.1
+    gb_max_depth: int = 3
+
+    xgboost_n_estimators: int = 200
+    xgboost_learning_rate: float = 0.1
+    xgboost_max_depth: int = 3
+
+    random_state: int = 42
+
+    def __post_init__(self) -> None:
+        for name in ("adaboost_n_estimators", "gb_n_estimators", "xgboost_n_estimators"):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be >= 1, got {getattr(self, name)}")
+        for name in ("adaboost_learning_rate", "gb_learning_rate", "xgboost_learning_rate"):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be positive, got {getattr(self, name)}")
+        for name in ("adaboost_stump_max_depth", "gb_max_depth", "xgboost_max_depth"):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be >= 1, got {getattr(self, name)}")
+
+
 # ---------------------------------------------------------------------------
 # Experiment settings
 # ---------------------------------------------------------------------------

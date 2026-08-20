@@ -177,3 +177,40 @@ observed tend to be chosen to flatter them.
 
 The report's results section exists as a scaffold with `[TBD]` values and fixed
 table structures. Week 4 fills blanks; it does not decide what to report.
+
+---
+
+## D10 — Pending: which boosting algorithm is *the* falsification test
+
+**Not yet decided.** CLAUDE.md's hypothesis says "falsified if boosting beats a
+depth-limited tree by more than the CV standard deviation," but Layer 3 has
+three boosting algorithms (AdaBoost, Gradient Boosting, XGBoost), and this gap
+was never noticed until all three existed to compare against the baseline
+(`configs/decision_tree.yaml`).
+
+Measured on identical 5×5 CV folds, PR-AUC vs. the depth-limited tree:
+
+| Algorithm | Δ PR-AUC | Beats baseline beyond the CV SD? |
+|---|---|---|
+| Gradient Boosting | +0.065 | Yes — falsifies the hypothesis |
+| XGBoost | +0.026 | No |
+| AdaBoost | −0.057 | Yes, but *worse*, not better |
+
+Matched hyperparameters between GB and XGBoost (`BoostingConfig`) rule out
+"different settings" as the explanation for the split verdict.
+
+Choosing a single algorithm *now*, after seeing this table, would be exactly
+the kind of post-hoc metric selection D9 exists to prevent. Two honest ways
+to resolve it, neither taken yet:
+
+1. Pick one algorithm as the pre-registered test **before** looking at Layer
+   4's cost-based results, on grounds independent of which one currently
+   wins (e.g. "XGBoost, because it is the one CLAUDE.md's locked imbalance
+   decision names by parameter name").
+2. Require all three to trip the criterion before calling the hypothesis
+   falsified, treating a split result as "inconclusive on this metric."
+
+Also unresolved: this whole comparison is on PR-AUC, a proxy. The hypothesis
+is stated against expected cost, which needs Layer 4 (not yet built). Revisit
+this decision when Layer 4 lands, not before -- and record whichever option
+is chosen here, with the reasoning, before Layer 4 results are reviewed.

@@ -1,0 +1,31 @@
+# Layer 3: Gradient Boosting, reweighted via explicit sample_weight (no
+# class_weight parameter exists for this algorithm). See
+# models/trees/boosting.py and BoostingConfig in config.py.
+#
+# This is the strongest boosted model measured so far, and the one that
+# currently trips CLAUDE.md's falsification test on PR-AUC: it beats the
+# depth-limited tree (configs/decision_tree.yaml) by more than the
+# cross-validation spread. See README.md's falsification-test section
+# before treating that as a final verdict -- it is a PR-AUC proxy check,
+# not the cost-based test the hypothesis is actually stated against, and it
+# has not been checked for what happens under a multiple-comparisons
+# correction across all three boosting algorithms in this layer.
+#
+# Run:  python scripts/run_experiment.py configs/gradient_boosting.yaml
+
+name: gradient_boosting
+estimator: gradient_boosting
+
+seeds: [0, 1, 2, 3, 4]
+
+cv:
+  n_splits: 5
+  n_repeats: 5
+  random_state: 42
+  shuffle: true
+
+metrics:
+  beta: 2.0
+  report_threshold: 0.5
+
+# Cost constants stay unset -- see dummy.yaml.

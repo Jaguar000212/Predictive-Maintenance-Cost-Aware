@@ -1,0 +1,31 @@
+# Layer 2: Gaussian + categorical Naive Bayes.
+#
+# Uses AI4I's true class prior (~3.4%), not class_weight='balanced' -- this
+# layer's job is calibrated probabilities, and reweighting toward 50/50 would
+# miscalibrate them the way SMOTE does. See BayesianConfig in config.py.
+#
+# Expected before running: PR-AUC well below Layer 3's trees (naive
+# independence is violated here -- power_w/temp_diff sit in the feature
+# matrix alongside the raw sensors they're derived from, so a feature and
+# its own derivation get double-counted as separate evidence). Brier
+# noticeably worse than the Bayesian logistic regression run alongside it,
+# for the same reason -- see models/bayes/gnb.py.
+#
+# Run:  python scripts/run_experiment.py configs/gnb.yaml
+
+name: gnb
+estimator: gnb
+
+seeds: [0, 1, 2, 3, 4]
+
+cv:
+  n_splits: 5
+  n_repeats: 5
+  random_state: 42
+  shuffle: true
+
+metrics:
+  beta: 2.0
+  report_threshold: 0.5
+
+# Cost constants stay unset -- see dummy.yaml.

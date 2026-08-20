@@ -1,0 +1,29 @@
+# Layer 2: Bayesian logistic regression (Laplace's approximation).
+#
+# Uses AI4I's true class prior (~3.4%), not class_weight='balanced' -- same
+# reasoning as gnb.yaml. See BayesianConfig in config.py.
+#
+# Expected before running: better-calibrated (lower Brier) than gnb, since
+# this model has no independence assumption for correlated physics features
+# to violate. Lower recall at the default 0.5 threshold than the Layer 3
+# trees -- a linear decision boundary is a real constraint physics features
+# only partly relax.
+#
+# Run:  python scripts/run_experiment.py configs/bayes_logreg.yaml
+
+name: bayes_logreg
+estimator: bayes_logreg
+
+seeds: [0, 1, 2, 3, 4]
+
+cv:
+  n_splits: 5
+  n_repeats: 5
+  random_state: 42
+  shuffle: true
+
+metrics:
+  beta: 2.0
+  report_threshold: 0.5
+
+# Cost constants stay unset -- see dummy.yaml.

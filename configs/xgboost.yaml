@@ -1,0 +1,29 @@
+# Layer 3: XGBoost, reweighted via scale_pos_weight computed at fit time --
+# literally what CLAUDE.md's locked imbalance decision names by name. See
+# models/trees/boosting.py and BoostingConfig in config.py.
+#
+# Expected before running: PR-AUC comparable to Gradient Boosting (both are
+# gradient-boosted trees with matched hyperparameters -- see BoostingConfig's
+# docstring for why they are kept matched), but measured NOT to exceed the
+# depth-limited tree's CV spread the way Gradient Boosting does -- the two
+# boosting implementations do not agree on whether the falsification test
+# trips. See README.md's falsification-test section.
+#
+# Run:  python scripts/run_experiment.py configs/xgboost.yaml
+
+name: xgboost
+estimator: xgboost
+
+seeds: [0, 1, 2, 3, 4]
+
+cv:
+  n_splits: 5
+  n_repeats: 5
+  random_state: 42
+  shuffle: true
+
+metrics:
+  beta: 2.0
+  report_threshold: 0.5
+
+# Cost constants stay unset -- see dummy.yaml.

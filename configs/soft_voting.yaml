@@ -1,0 +1,32 @@
+# Layer 3: soft-voting ensemble of this layer's other five models
+# (decision tree, Random Forest, AdaBoost, Gradient Boosting, XGBoost).
+# See models/trees/voting.py.
+#
+# This is descriptive, not part of the pre-registered falsification test --
+# it combines the baseline tree itself with every challenger, so "does it
+# beat the tree" is not a clean question for an ensemble that contains the
+# tree. Expected before running: the best PR-AUC of any single Layer 3
+# model, since averaging tends to smooth out each member's individual
+# weaknesses (this is also visible in its Brier score, better than AdaBoost's
+# alone despite AdaBoost being a full voting member).
+#
+# The slowest config to run here -- five full model fits per fold.
+#
+# Run:  python scripts/run_experiment.py configs/soft_voting.yaml
+
+name: soft_voting
+estimator: soft_voting
+
+seeds: [0, 1, 2, 3, 4]
+
+cv:
+  n_splits: 5
+  n_repeats: 5
+  random_state: 42
+  shuffle: true
+
+metrics:
+  beta: 2.0
+  report_threshold: 0.5
+
+# Cost constants stay unset -- see dummy.yaml.

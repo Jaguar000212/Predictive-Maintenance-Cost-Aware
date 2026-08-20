@@ -1,0 +1,36 @@
+# Layer 3: AdaBoost over plain (unweighted) one-level decision stumps.
+#
+# Imbalance handling here is a ONE-TIME initial sample weighting, not
+# class_weight on the stump -- see models/trees/boosting.py for why the
+# obvious approach (class_weight='balanced' on the stump) measurably breaks
+# AdaBoost: it compounds with AdaBoost's own adaptive reweighting every
+# round and drove weighted training error to exactly 1.0 by round 3 in an
+# earlier version of this file (PR-AUC 0.17 instead of ~0.78).
+#
+# Expected before running: PR-AUC below Random Forest and Gradient Boosting,
+# comparable to or below the single depth-limited tree -- classic AdaBoost's
+# shallow stumps are a weaker base learner than a depth-4 tree on this
+# problem. Brier noticeably WORSE than every other model here, including the
+# constant-negative baseline: AdaBoost's SAMME margin-based probabilities are
+# a well-documented case of poor calibration in the literature
+# (Niculescu-Mizil & Caruana, 2005), not a bug specific to this
+# implementation.
+#
+# Run:  python scripts/run_experiment.py configs/adaboost.yaml
+
+name: adaboost
+estimator: adaboost
+
+seeds: [0, 1, 2, 3, 4]
+
+cv:
+  n_splits: 5
+  n_repeats: 5
+  random_state: 42
+  shuffle: true
+
+metrics:
+  beta: 2.0
+  report_threshold: 0.5
+
+# Cost constants stay unset -- see dummy.yaml.

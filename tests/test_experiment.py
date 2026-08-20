@@ -208,3 +208,25 @@ def test_random_forest_ranks_well_and_is_better_calibrated_than_the_tree():
 
     assert summary["pr_auc"]["mean"] > 0.6
     assert summary["brier"]["mean"] < 0.0339  # better than the base-rate dummy
+
+
+def test_adaboost_is_not_broken_by_double_reweighting():
+    """Regression test for a real bug: an earlier version of boosting.py put
+    class_weight='balanced' on AdaBoost's base stump, which compounds with
+    AdaBoost's own adaptive sample reweighting every round instead of just
+    the first. Measured effect: PR-AUC 0.17 on real data (barely above the
+    0.0339 base rate) versus ~0.78 once fixed to a one-time initial
+    sample_weight. This pins the fixed, healthy range so a regression to the
+    old behaviour fails loudly here rather than being noticed as "boosting
+    doesn't help" months later.
+
+    Also pins the (real, literature-documented) flip side: AdaBoost's SAMME
+    probabilities are notoriously poorly calibrated -- Brier is expected to
+    be the worst of any Layer 3 model, not a sign this is still broken.
+    """
+    config = ExperimentConfig(estimator="adaboost").with_(cv=CVConfig(n_splits=5, n_repeats=1))
+    record, _ = run(config, write=False)
+    summary = record.metrics["summary"]
+
+    assert summary["pr_auc"]["mean"] > 0.6
+    assert summary["brier"]["mean"] > 0.1

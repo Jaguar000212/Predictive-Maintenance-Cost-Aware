@@ -22,12 +22,14 @@ from sklearn.dummy import DummyClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from ..config import AI4ISchema, BayesianConfig, TreeConfig
+from ..config import AI4ISchema, BayesianConfig, BoostingConfig, TreeConfig
 from ..features.physics import PhysicsFeatures
 from .bayes.bayes_logreg import BayesianLogisticRegression
 from .bayes.gnb import MixedNaiveBayes
+from .trees.boosting import build_adaboost, build_gradient_boosting, build_xgboost
 from .trees.forest import build_random_forest
 from .trees.tree import build_depth_limited_tree
+from .trees.voting import build_soft_voting
 
 EstimatorFactory = Callable[[], Any]
 Builder = Callable[[AI4ISchema, int], EstimatorFactory]
@@ -220,3 +222,48 @@ def _random_forest(schema: AI4ISchema, seed: int) -> EstimatorFactory:
     """Layer 3: bagged, unrestricted-depth trees. See `models/trees/forest.py`."""
     config = TreeConfig(random_state=seed)
     return _physics_pipeline(schema, build_random_forest(config), scale=False)
+
+
+@register("adaboost")
+def _adaboost(schema: AI4ISchema, seed: int) -> EstimatorFactory:
+    """Layer 3: AdaBoost over `class_weight='balanced'` decision stumps.
+
+    See `models/trees/boosting.py` for why the locked imbalance decision is
+    applied to the base stump rather than to `AdaBoostClassifier` itself,
+    which has no `class_weight` parameter.
+    """
+    config = BoostingConfig(random_state=seed)
+    return _physics_pipeline(schema, build_adaboost(config), scale=False)
+
+
+@register("gradient_boosting")
+def _gradient_boosting(schema: AI4ISchema, seed: int) -> EstimatorFactory:
+    """Layer 3: Gradient Boosting, reweighted via explicit `sample_weight`
+    computed at fit time -- see `models/trees/boosting.py`. There is no
+    `class_weight` parameter to set for this algorithm; this is the
+    equivalent applied the only way sklearn's API allows.
+    """
+    config = BoostingConfig(random_state=seed)
+    return _physics_pipeline(schema, build_gradient_boosting(config), scale=False)
+
+
+@register("xgboost")
+def _xgboost(schema: AI4ISchema, seed: int) -> EstimatorFactory:
+    """Layer 3: XGBoost, reweighted via `scale_pos_weight` computed at fit
+    time -- literally what CLAUDE.md's locked imbalance decision names by
+    name. See `models/trees/boosting.py`.
+    """
+    config = BoostingConfig(random_state=seed)
+    return _physics_pipeline(schema, build_xgboost(config), scale=False)
+
+
+@register("soft_voting")
+def _soft_voting(schema: AI4ISchema, seed: int) -> EstimatorFactory:
+    """Layer 3: soft-voting ensemble of this layer's other five models.
+
+    See `models/trees/voting.py`. Each member is built with the same configs
+    used when it is registered and run on its own.
+    """
+    tree_config = TreeConfig(random_state=seed)
+    boosting_config = BoostingConfig(random_state=seed)
+    return _physics_pipeline(schema, build_soft_voting(tree_config, boosting_config), scale=False)

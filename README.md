@@ -319,8 +319,86 @@ comparable to Layer 2's on its own terms. Pinned as a regression test.
 the single tree controls variance by depth, Random Forest controls it by
 bagging and averaging many unrestricted trees instead — and that averaging
 turns out to fix the calibration problem as a side effect nobody designed
-in: measured Brier 0.0095, comfortably better than the base rate, alongside
+in: measured Brier 0.0093, comfortably better than the base rate, alongside
 PR-AUC 0.89.
+
+**`boosting.py` — AdaBoost, Gradient Boosting, XGBoost.** None of these three
+accept `class_weight`, a real sklearn/XGBoost API gap, so each gets the
+locked imbalance decision applied by whatever mechanism it actually
+supports: Gradient Boosting via explicit `sample_weight`
+(`BalancedGradientBoosting`), XGBoost via `scale_pos_weight`
+(`BalancedXGBClassifier`) — literally what CLAUDE.md's locked decision names
+by name — both computed fresh from each fit call's own labels, never the
+whole dataset.
+
+**A bug caught before it shipped, not after.** AdaBoost's first version
+applied the same pattern as the depth-limited tree: `class_weight='balanced'`
+on its base stump. Measured result: **PR-AUC 0.17** — barely above the 0.0339
+base rate, versus 0.83–0.90 for every other Layer 3 model. Diagnosis: the
+stump's fixed reweighting compounds with AdaBoost's own *adaptive* sample
+reweighting on every round, not just the first, and by round 3 the weighted
+training error hit exactly 1.0 (degenerate) — silently wasting 197 of 200
+rounds. Fix: `BalancedAdaBoost` applies the balanced weighting exactly once,
+as the ensemble's *initial* sample distribution, via the `sample_weight`
+argument `AdaBoostClassifier.fit` already exposes for this — then lets
+AdaBoost's normal per-round adaptation run unmodified. Measured after the
+fix: PR-AUC 0.78. Pinned as a permanent regression test precisely so a
+reintroduced version of this bug fails a test instead of reading as "AdaBoost
+just doesn't help here."
+
+AdaBoost's Brier score (0.1975) is still the worst of any Layer 3 model —
+but that part is not a bug. SAMME's margin-based probability estimates are a
+well-documented case of poor calibration in the literature (Niculescu-Mizil
+& Caruana, 2005), independent of any reweighting scheme.
+
+**`voting.py` — soft-voting ensemble.** Averages predicted probabilities
+across all five other Layer 3 models (`sklearn.ensemble.VotingClassifier`,
+`voting="soft"`), each built via the exact same `build_*` functions and
+configs used when it runs standalone. Because it clones and fits each member
+independently, `registry.py`'s per-fold `clone()` fix (see git history)
+already covers it with no extra work.
+
+## The falsification test
+
+CLAUDE.md's hypothesis: physics features let tree models converge to
+statistically indistinguishable performance, falsified if boosting beats the
+depth-limited tree by more than the cross-validation spread. With all six
+Layer 3 models built, this is now computable — with two caveats that matter
+more than the number itself.
+
+**Caveat 1 — this is a PR-AUC proxy, not the real test.** The hypothesis is
+actually stated against *expected cost* ("does complexity improve outcomes
+once evaluated on cost rather than accuracy"), and the cost model (Layer 4)
+does not exist yet. What follows is a preliminary look using PR-AUC, one of
+the locked primary metrics but not the authoritative one.
+
+**Caveat 2 — "boosting" is three algorithms, and this project never
+pre-registered which one counts.** That gap surfaced only once all three
+existed to compare. Testing all three without correcting for it is exactly
+the multiple-comparisons risk CLAUDE.md's own architecture invites, so all
+three are reported rather than the best one picked after the fact:
+
+| Challenger vs. depth-limited tree | Δ PR-AUC | CV SD used | Beats baseline beyond SD? |
+|---|---|---|---|
+| Random Forest (bagging, not boosting) | +0.056 | 0.043 | Yes |
+| AdaBoost | **−0.057** | 0.043 | Yes — but *worse*, not better |
+| Gradient Boosting | **+0.065** | 0.043 | **Yes** |
+| XGBoost | +0.026 | 0.043 | No |
+| Soft voting (contains the baseline itself) | +0.071 | 0.043 | Yes, but not a clean test |
+
+Computed with `pdm.eval.cv.compare()` on identical 5×5 folds (`random_state=42`).
+
+**Reading it honestly:** one of three boosting algorithms (Gradient
+Boosting) trips the literal falsification criterion on this proxy metric;
+XGBoost — matched to it on every hyperparameter — does not; AdaBoost
+underperforms the baseline outright. That is not "boosting wins" or
+"the hypothesis holds" — it is evidence the hypothesis's binary framing of
+"boosting" as one thing doesn't survive contact with three actual boosting
+implementations. This needs a decision, not a default: either pre-register
+one specific algorithm as *the* test going forward (recorded in
+`docs/DECISIONS.md`, before Layer 4 is built, not after), or require all
+three to trip before calling the hypothesis falsified. Left open
+deliberately rather than resolved by whichever framing was convenient.
 
 ## Status
 
@@ -333,21 +411,27 @@ than the model being poor.
 EDA complete. Evaluation harness complete: metrics, cross-validation, the
 model-comparison rule, calibration diagnostics, and run recording. Physics
 features, the Layer 1 Weibull MLE, Layer 2 (Gaussian NB, Bayesian logistic
-regression), and Layer 3's first two models (depth-limited tree, Random
-Forest) are built. Week 2's gate (Weibull validated, reliability diagrams
-exist) is satisfied in code; AdaBoost, Gradient Boosting, XGBoost, and soft
-Voting remain before Layer 3 — and the falsification test itself — are
-complete.
+regression), and all six Layer 3 models (depth-limited tree, Random Forest,
+AdaBoost, Gradient Boosting, XGBoost, soft voting) are built, each with a
+committed `configs/*.yaml`. Week 2's gate (Weibull validated, reliability
+diagrams exist) is satisfied in code.
 
-186 tests cover the config guards, the loader corruption paths (against synthetic
+The falsification test itself now runs (see above) — with a genuinely mixed,
+not-yet-resolved result across the three boosting algorithms, and pending
+Layer 4's cost model before it can be called authoritative rather than a
+PR-AUC proxy. That resolution, plus Layer 4 (cost model, threshold
+optimisation, policy table), is what's left before Week 4's freeze.
+
+215 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the
 cross-validation leakage guarantees, the physics formulas, the Weibull MLE
 (including recovery under simulated censoring and agreement with an
 independent oracle), the Layer 2 likelihood/posterior formulas (against hand
 recomputations, including the Laplace covariance and its zero-variance limit),
 the Brier decomposition (against an independent row-level recomputation), the
-Layer 3 calibration finding above (pinned as a real-data regression test, not
-just observed once), and the gate itself.
+Layer 3 calibration findings above and the AdaBoost reweighting bug (each
+pinned as a real-data regression test, not just observed once), and the gate
+itself.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
 Rationale for each decision is in `docs/DECISIONS.md`.
