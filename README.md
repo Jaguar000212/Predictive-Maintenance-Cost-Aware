@@ -289,6 +289,39 @@ equally well), but reliability differs by two orders of magnitude (GNB
 it is calibration error, isolated precisely to the mechanism predicted before
 this was run: correlated features counted as independent evidence.
 
+## Layer 3 — decision tree and Random Forest
+
+`src/pdm/models/trees/` holds thin, deliberately un-tuned sklearn wrappers —
+there's no hand-written math here the way there is for Weibull or the
+Laplace covariance, so the tests focus on the settings that make this layer
+what it is, not on a formula.
+
+**`tree.py` — the depth-limited tree.** This is the fixed point CLAUDE.md's
+falsification test is measured against: *does boosting beat this tree by
+more than the cross-validation spread*. `max_depth=4` is a stated, fixed
+choice (see `TreeConfig`), not a tuned one — tuning it would need nested CV,
+which would turn "depth-limited baseline" into just another optimised model.
+`class_weight='balanced'` applies CLAUDE.md's locked imbalance rule directly,
+with no Layer 2 style carve-out — this is a discriminative classifier.
+
+**A finding worth stating rather than discovering by surprise later.**
+Measured on real data: PR-AUC 0.83 (physics features make the deterministic
+failure modes close to axis-aligned cuts, reachable in a handful of splits),
+but Brier 0.0373 — **worse than the trivial constant-negative baseline's
+0.0339.** Not a bug: `class_weight='balanced'` pushes leaf probabilities away
+from the true ~3.4% base rate, the exact mechanism CLAUDE.md rejects SMOTE
+for. `predict_proba()` here ranks reliably but is not a trustworthy
+probability at the real prevalence — threshold-swept metrics are unaffected
+(they count confusion outcomes empirically), but this Brier score is not
+comparable to Layer 2's on its own terms. Pinned as a regression test.
+
+**`forest.py` — Random Forest.** `forest_max_depth=None` is deliberate. Where
+the single tree controls variance by depth, Random Forest controls it by
+bagging and averaging many unrestricted trees instead — and that averaging
+turns out to fix the calibration problem as a side effect nobody designed
+in: measured Brier 0.0095, comfortably better than the base rate, alongside
+PR-AUC 0.89.
+
 ## Status
 
 **Week 1 gate passed.** The constant-negative baseline runs end to end and writes
@@ -299,19 +332,22 @@ than the model being poor.
 
 EDA complete. Evaluation harness complete: metrics, cross-validation, the
 model-comparison rule, calibration diagnostics, and run recording. Physics
-features, the Layer 1 Weibull MLE, and Layer 2 (Gaussian NB, Bayesian
-logistic regression) are built. Layer 3 (tree models) is next — the last
-piece before Week 2's gate (Weibull validated, reliability diagrams exist)
-closes.
+features, the Layer 1 Weibull MLE, Layer 2 (Gaussian NB, Bayesian logistic
+regression), and Layer 3's first two models (depth-limited tree, Random
+Forest) are built. Week 2's gate (Weibull validated, reliability diagrams
+exist) is satisfied in code; AdaBoost, Gradient Boosting, XGBoost, and soft
+Voting remain before Layer 3 — and the falsification test itself — are
+complete.
 
-164 tests cover the config guards, the loader corruption paths (against synthetic
+186 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the
 cross-validation leakage guarantees, the physics formulas, the Weibull MLE
 (including recovery under simulated censoring and agreement with an
 independent oracle), the Layer 2 likelihood/posterior formulas (against hand
 recomputations, including the Laplace covariance and its zero-variance limit),
-the Brier decomposition (against an independent row-level recomputation),
-and the gate itself.
+the Brier decomposition (against an independent row-level recomputation), the
+Layer 3 calibration finding above (pinned as a real-data regression test, not
+just observed once), and the gate itself.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
 Rationale for each decision is in `docs/DECISIONS.md`.

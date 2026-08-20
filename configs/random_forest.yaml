@@ -1,0 +1,29 @@
+# Layer 3: Random Forest -- bagged, unrestricted-depth trees.
+#
+# Unlike the depth-limited baseline, per-tree depth is left unrestricted;
+# bagging plus averaging across many trees is this model's own variance
+# control (see TreeConfig in config.py).
+#
+# Expected before running: PR-AUC at or above the depth-limited tree's, and
+# meaningfully better-calibrated (Brier below the 0.0339 base rate) -- the
+# averaging that smooths individual trees' overconfident leaf probabilities
+# back toward something realistic.
+#
+# Run:  python scripts/run_experiment.py configs/random_forest.yaml
+
+name: random_forest
+estimator: random_forest
+
+seeds: [0, 1, 2, 3, 4]
+
+cv:
+  n_splits: 5
+  n_repeats: 5
+  random_state: 42
+  shuffle: true
+
+metrics:
+  beta: 2.0
+  report_threshold: 0.5
+
+# Cost constants stay unset -- see dummy.yaml.

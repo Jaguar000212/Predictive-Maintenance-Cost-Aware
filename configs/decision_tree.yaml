@@ -1,0 +1,31 @@
+# Layer 3 baseline: a depth-limited decision tree.
+#
+# This is the fixed point CLAUDE.md's falsification test is measured against
+# -- "does boosting beat this tree by more than the CV spread". max_depth is a
+# deliberate, fixed choice (see TreeConfig in config.py), not tuned.
+#
+# Expected before running: PR-AUC well above Layer 2's ~0.46-0.49 (physics
+# features make the deterministic failure modes close to axis-aligned cuts,
+# which a small tree can reach directly). Brier WORSE than the constant-
+# negative baseline's 0.0339 is also expected, not a bug -- class_weight=
+# 'balanced' pushes probabilities away from the true base rate. Anything
+# above the ~97.35% extended recall ceiling would be a leakage path.
+#
+# Run:  python scripts/run_experiment.py configs/decision_tree.yaml
+
+name: decision_tree
+estimator: decision_tree
+
+seeds: [0, 1, 2, 3, 4]
+
+cv:
+  n_splits: 5
+  n_repeats: 5
+  random_state: 42
+  shuffle: true
+
+metrics:
+  beta: 2.0
+  report_threshold: 0.5
+
+# Cost constants stay unset -- see dummy.yaml.

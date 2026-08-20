@@ -368,6 +368,58 @@ class CalibrationConfig:
             raise ValueError(f"n_bins must be >= 1, got {self.n_bins}")
 
 
+@dataclass(frozen=True)
+class TreeConfig:
+    """Layer 3: decision tree and Random Forest settings.
+
+    `class_weight='balanced'` is applied directly in `models/trees/*.py`, not
+    exposed as a toggle here -- unlike Layer 2's `BayesianConfig`, which had a
+    real, stated reason to deviate from it (calibration). Trees are exactly
+    the discriminative classifiers CLAUDE.md's locked imbalance rule targets;
+    there is no carve-out for them.
+
+    `depth_limited_max_depth` is the single most important number in this
+    file. CLAUDE.md's falsification test is "does boosting beat this tree by
+    more than the CV spread" -- this tree IS the baseline that test is run
+    against. 4 is a deliberate, fixed choice, not a tuned one: tuning it
+    would need nested CV (search inside each outer fold), which would defeat
+    the point of "depth-limited" here -- a fixed, simple baseline that added
+    complexity is measured against, not itself optimised. Chosen because each
+    physics feature turns roughly one failure mode into one axis-aligned cut
+    (HDF: 1 split on temp_diff; PWF: 2 splits bounding power_w; OSF: 2-3
+    splits on wear_strain conditioned on type), so a small tree only needs
+    enough depth to combine a handful of OR'd rules, not memorise rows.
+
+    `forest_max_depth=None` is also a deliberate choice, not an oversight:
+    Random Forest's variance control comes from bagging + averaging many
+    trees, not from limiting any single tree's depth, so its per-tree depth
+    is left unrestricted -- unlike the depth-limited baseline it is compared
+    against.
+    """
+
+    depth_limited_max_depth: int = 4
+    depth_limited_min_samples_leaf: int = 10
+    random_state: int = 42
+
+    forest_n_estimators: int = 300
+    forest_max_depth: int | None = None
+    forest_min_samples_leaf: int = 1
+
+    def __post_init__(self) -> None:
+        if self.depth_limited_max_depth < 1:
+            raise ValueError(f"depth_limited_max_depth must be >= 1, got {self.depth_limited_max_depth}")
+        if self.depth_limited_min_samples_leaf < 1:
+            raise ValueError(
+                f"depth_limited_min_samples_leaf must be >= 1, got {self.depth_limited_min_samples_leaf}"
+            )
+        if self.forest_n_estimators < 1:
+            raise ValueError(f"forest_n_estimators must be >= 1, got {self.forest_n_estimators}")
+        if self.forest_max_depth is not None and self.forest_max_depth < 1:
+            raise ValueError(f"forest_max_depth must be >= 1 or None, got {self.forest_max_depth}")
+        if self.forest_min_samples_leaf < 1:
+            raise ValueError(f"forest_min_samples_leaf must be >= 1, got {self.forest_min_samples_leaf}")
+
+
 # ---------------------------------------------------------------------------
 # Experiment settings
 # ---------------------------------------------------------------------------

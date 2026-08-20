@@ -22,10 +22,12 @@ from sklearn.dummy import DummyClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from ..config import AI4ISchema, BayesianConfig
+from ..config import AI4ISchema, BayesianConfig, TreeConfig
 from ..features.physics import PhysicsFeatures
 from .bayes.bayes_logreg import BayesianLogisticRegression
 from .bayes.gnb import MixedNaiveBayes
+from .trees.forest import build_random_forest
+from .trees.tree import build_depth_limited_tree
 
 EstimatorFactory = Callable[[], Any]
 Builder = Callable[[AI4ISchema, int], EstimatorFactory]
@@ -197,3 +199,24 @@ def _bayes_logreg(schema: AI4ISchema, seed: int) -> EstimatorFactory:
     mean the same thing across features.
     """
     return _physics_pipeline(schema, BayesianLogisticRegression(BayesianConfig()), scale=True)
+
+
+@register("decision_tree")
+def _decision_tree(schema: AI4ISchema, seed: int) -> EstimatorFactory:
+    """Layer 3's baseline -- see `models/trees/tree.py` and `TreeConfig` for
+    why `max_depth` is a fixed, stated choice rather than a tuned one. This
+    is the model CLAUDE.md's falsification test (boosting vs. this tree,
+    beyond the CV spread) is measured against.
+
+    `scale=False`: trees split on raw thresholds and gain nothing from
+    scaling.
+    """
+    config = TreeConfig(random_state=seed)
+    return _physics_pipeline(schema, build_depth_limited_tree(config), scale=False)
+
+
+@register("random_forest")
+def _random_forest(schema: AI4ISchema, seed: int) -> EstimatorFactory:
+    """Layer 3: bagged, unrestricted-depth trees. See `models/trees/forest.py`."""
+    config = TreeConfig(random_state=seed)
+    return _physics_pipeline(schema, build_random_forest(config), scale=False)

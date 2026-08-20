@@ -43,7 +43,9 @@ def test_unknown_estimator_is_rejected_with_the_valid_names():
         registry.build("xgboost_9000", AI4ISchema(), seed=0)
 
 
-@pytest.mark.parametrize("name", ["dummy_stratified", "gnb", "bayes_logreg"])
+@pytest.mark.parametrize(
+    "name", ["dummy_stratified", "gnb", "bayes_logreg", "decision_tree", "random_forest"]
+)
 def test_every_factory_call_produces_a_fresh_unfitted_classifier(name):
     """Regression test for a structural risk fixed in registry.py: the
     classifier step (and, for the physics pipeline, every step) must be
@@ -174,3 +176,35 @@ def test_gate_writes_a_results_json(tmp_path):
     _, path = run(config, write=True)
     assert path is not None and path.exists()
     assert path.parent == tmp_path / "results"
+
+
+# ---------------------------------------------------------------------------
+# Layer 3 on real data -- pins a finding documented in models/trees/tree.py
+# ---------------------------------------------------------------------------
+def test_balanced_tree_ranks_well_but_is_worse_calibrated_than_the_dummy():
+    """class_weight='balanced' pushes probabilities away from the true base
+    rate the same way SMOTE does (see tree.py's docstring) -- measured here as
+    Brier WORSE than the trivial constant-negative baseline (0.0339), despite
+    a PR-AUC far above it. Not a bug; a documented, load-bearing caveat about
+    what this model's raw predict_proba() does and does not mean. If this
+    regresses, the reasoning in tree.py needs revisiting, not just this test.
+    """
+    config = ExperimentConfig(estimator="decision_tree").with_(cv=CVConfig(n_splits=5, n_repeats=1))
+    record, _ = run(config, write=False)
+    summary = record.metrics["summary"]
+
+    assert summary["pr_auc"]["mean"] > 0.6
+    assert summary["brier"]["mean"] > 0.0339  # worse than the base-rate dummy
+
+
+def test_random_forest_ranks_well_and_is_better_calibrated_than_the_tree():
+    """Averaging many trees smooths leaf probabilities back toward something
+    realistic -- an emergent property, not a design choice -- so Random
+    Forest does not carry the single tree's calibration caveat.
+    """
+    config = ExperimentConfig(estimator="random_forest").with_(cv=CVConfig(n_splits=5, n_repeats=1))
+    record, _ = run(config, write=False)
+    summary = record.metrics["summary"]
+
+    assert summary["pr_auc"]["mean"] > 0.6
+    assert summary["brier"]["mean"] < 0.0339  # better than the base-rate dummy
