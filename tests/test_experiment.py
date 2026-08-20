@@ -43,6 +43,21 @@ def test_unknown_estimator_is_rejected_with_the_valid_names():
         registry.build("xgboost_9000", AI4ISchema(), seed=0)
 
 
+@pytest.mark.parametrize("name", ["dummy_stratified", "gnb", "bayes_logreg"])
+def test_every_factory_call_produces_a_fresh_unfitted_classifier(name):
+    """Regression test for a structural risk fixed in registry.py: the
+    classifier step (and, for the physics pipeline, every step) must be
+    constructed fresh per call, not captured once and reused across folds.
+    Today's estimators reset their own state on refit, so reuse would not
+    currently produce a wrong number -- but the factory pattern exists
+    precisely so that stops being something anyone has to get right by luck.
+    """
+    factory = registry.build(name, AI4ISchema(), seed=0)
+    first = factory().named_steps["classifier"]
+    second = factory().named_steps["classifier"]
+    assert first is not second
+
+
 def test_duplicate_registration_is_rejected():
     with pytest.raises(ValueError, match="already registered"):
         registry.register("dummy_prior")(lambda schema, seed: None)

@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from sklearn.base import clone
 from sklearn.compose import ColumnTransformer
 from sklearn.dummy import DummyClassifier
 from sklearn.pipeline import Pipeline
@@ -97,7 +98,18 @@ def engineered_preprocessor(schema: AI4ISchema) -> ColumnTransformer:
 
 
 def _pipeline(schema: AI4ISchema, classifier: Any) -> EstimatorFactory:
-    return lambda: Pipeline([("preprocess", preprocessor(schema)), ("classifier", classifier)])
+    """`classifier` is cloned inside the returned closure, not reused.
+
+    Every other piece here (`preprocessor(schema)`) was already built fresh
+    per call; `classifier` was the one object captured once by the closure
+    and handed to every fold's `Pipeline` unchanged. Nothing currently
+    registered has warm-start or other cross-fit state, so this was not
+    producing wrong numbers -- but it was relying on that being true rather
+    than making it structurally impossible to get wrong, which is the whole
+    point of the factory pattern documented in `eval/cv.py`. `clone()` is
+    what `sklearn.model_selection` itself uses for exactly this reason.
+    """
+    return lambda: Pipeline([("preprocess", preprocessor(schema)), ("classifier", clone(classifier))])
 
 
 def _physics_pipeline(schema: AI4ISchema, classifier: Any, scale: bool = False) -> EstimatorFactory:
@@ -106,17 +118,25 @@ def _physics_pipeline(schema: AI4ISchema, classifier: Any, scale: bool = False) 
     `scale=True` adds a `StandardScaler` after preprocessing -- needed for
     regularised linear models (an L2 penalty only means the same thing across
     features on comparable scales) but deliberately not used for trees, which
-    split on raw thresholds and do not need it. Fit inside this pipeline, so
-    `CrossValidator` refits it on train-fold rows only for every fold.
+    split on raw thresholds and do not need it.
+
+    Every step, including `classifier`, is constructed fresh inside the
+    returned closure -- see `_pipeline`'s docstring for why reusing a single
+    captured instance across folds is a structural risk even when today's
+    estimators happen to reset their own state cleanly on refit.
     """
-    steps: list[tuple[str, Any]] = [
-        ("physics", PhysicsFeatures(schema)),
-        ("preprocess", engineered_preprocessor(schema)),
-    ]
-    if scale:
-        steps.append(("scale", StandardScaler()))
-    steps.append(("classifier", classifier))
-    return lambda: Pipeline(steps)
+
+    def factory() -> Pipeline:
+        steps: list[tuple[str, Any]] = [
+            ("physics", PhysicsFeatures(schema)),
+            ("preprocess", engineered_preprocessor(schema)),
+        ]
+        if scale:
+            steps.append(("scale", StandardScaler()))
+        steps.append(("classifier", clone(classifier)))
+        return Pipeline(steps)
+
+    return factory
 
 
 @register("dummy_constant_negative")
