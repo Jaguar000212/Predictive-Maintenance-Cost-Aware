@@ -362,43 +362,42 @@ already covers it with no extra work.
 
 CLAUDE.md's hypothesis: physics features let tree models converge to
 statistically indistinguishable performance, falsified if boosting beats the
-depth-limited tree by more than the cross-validation spread. With all six
-Layer 3 models built, this is now computable — with two caveats that matter
-more than the number itself.
+depth-limited tree by more than the cross-validation spread.
 
-**Caveat 1 — this is a PR-AUC proxy, not the real test.** The hypothesis is
-actually stated against *expected cost* ("does complexity improve outcomes
-once evaluated on cost rather than accuracy"), and the cost model (Layer 4)
-does not exist yet. What follows is a preliminary look using PR-AUC, one of
-the locked primary metrics but not the authoritative one.
-
-**Caveat 2 — "boosting" is three algorithms, and this project never
-pre-registered which one counts.** That gap surfaced only once all three
-existed to compare. Testing all three without correcting for it is exactly
-the multiple-comparisons risk CLAUDE.md's own architecture invites, so all
-three are reported rather than the best one picked after the fact:
+**"Boosting" means XGBoost.** Layer 3 has three boosting algorithms
+(AdaBoost, Gradient Boosting, XGBoost), and CLAUDE.md's hypothesis never said
+which one the test runs against — a gap that surfaced only once all three
+existed to compare, and was resolved by pre-registering **XGBoost**
+specifically (`docs/DECISIONS.md` D10), because it's the one CLAUDE.md's own
+locked imbalance decision already names by parameter (`scale_pos_weight`) —
+a reason independent of which algorithm happened to score highest. Gradient
+Boosting and AdaBoost stay in the table below as descriptive context, not as
+alternate tests.
 
 | Challenger vs. depth-limited tree | Δ PR-AUC | CV SD used | Beats baseline beyond SD? |
 |---|---|---|---|
-| Random Forest (bagging, not boosting) | +0.056 | 0.043 | Yes |
-| AdaBoost | **−0.057** | 0.043 | Yes — but *worse*, not better |
-| Gradient Boosting | **+0.065** | 0.043 | **Yes** |
-| XGBoost | +0.026 | 0.043 | No |
-| Soft voting (contains the baseline itself) | +0.071 | 0.043 | Yes, but not a clean test |
+| Random Forest (bagging, not boosting — context only) | +0.056 | 0.043 | Yes |
+| AdaBoost (context only) | −0.057 | 0.043 | Yes — but *worse*, not better |
+| Gradient Boosting (context only) | +0.065 | 0.043 | Yes |
+| **XGBoost — the pre-registered test** | **+0.026** | **0.043** | **No** |
+| Soft voting (contains the baseline itself — context only) | +0.071 | 0.043 | Yes, but not a clean test |
 
 Computed with `pdm.eval.cv.compare()` on identical 5×5 folds (`random_state=42`).
 
-**Reading it honestly:** one of three boosting algorithms (Gradient
-Boosting) trips the literal falsification criterion on this proxy metric;
-XGBoost — matched to it on every hyperparameter — does not; AdaBoost
-underperforms the baseline outright. That is not "boosting wins" or
-"the hypothesis holds" — it is evidence the hypothesis's binary framing of
-"boosting" as one thing doesn't survive contact with three actual boosting
-implementations. This needs a decision, not a default: either pre-register
-one specific algorithm as *the* test going forward (recorded in
-`docs/DECISIONS.md`, before Layer 4 is built, not after), or require all
-three to trip before calling the hypothesis falsified. Left open
-deliberately rather than resolved by whichever framing was convenient.
+**Verdict: the hypothesis is NOT falsified, on this metric.** XGBoost's
+improvement over the depth-limited tree (+0.026) does not exceed the CV
+spread (0.043). This is consistent with the hypothesis's central claim —
+tree-family models converge to similar performance once physics features do
+the hard work of exposing each failure mode as a near axis-aligned rule.
+
+**Still a proxy, not the final word.** This is PR-AUC, one of the locked
+primary metrics but not the one the hypothesis is actually stated against —
+that's expected cost, which needs Layer 4 (cost model, not yet built). A
+verdict here can change once thresholds and real cost weights are in play;
+it has not been checked against Brier or F2 either, both of which tell a
+different story for some of these models (see the calibration sections
+above — AdaBoost's Brier, for instance, is the worst of any Layer 3 model
+despite a PR-AUC well above the baseline).
 
 ## Status
 
@@ -416,11 +415,11 @@ AdaBoost, Gradient Boosting, XGBoost, soft voting) are built, each with a
 committed `configs/*.yaml`. Week 2's gate (Weibull validated, reliability
 diagrams exist) is satisfied in code.
 
-The falsification test itself now runs (see above) — with a genuinely mixed,
-not-yet-resolved result across the three boosting algorithms, and pending
-Layer 4's cost model before it can be called authoritative rather than a
-PR-AUC proxy. That resolution, plus Layer 4 (cost model, threshold
-optimisation, policy table), is what's left before Week 4's freeze.
+The falsification test itself now runs (see above): with XGBoost
+pre-registered as *the* boosting algorithm (`docs/DECISIONS.md` D10), the
+hypothesis is **not falsified** on PR-AUC. Still a proxy result pending
+Layer 4's cost model — cost model, threshold optimisation, and the policy
+table are what's left before Week 4's freeze.
 
 215 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the

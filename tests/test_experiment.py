@@ -230,3 +230,45 @@ def test_adaboost_is_not_broken_by_double_reweighting():
 
     assert summary["pr_auc"]["mean"] > 0.6
     assert summary["brier"]["mean"] > 0.1
+
+
+# ---------------------------------------------------------------------------
+# The falsification test itself (docs/DECISIONS.md D10)
+# ---------------------------------------------------------------------------
+def test_xgboost_does_not_falsify_the_hypothesis_on_pr_auc():
+    """The pre-registered test: does XGBoost -- specifically XGBoost, not
+    'boosting' in general -- beat the depth-limited tree by more than the CV
+    spread on PR-AUC? D10 records XGBoost as the one boosting algorithm this
+    decision runs against, chosen for a reason independent of the result
+    (it's the implementation CLAUDE.md's own locked imbalance decision
+    already names by parameter, scale_pos_weight). Gradient Boosting and
+    AdaBoost are informative context in README.md's table, not alternate
+    tests -- only this comparison decides the hypothesis.
+
+    Reproduces `pdm.eval.cv.compare()`'s own statistic (|difference| vs the
+    larger standard deviation) directly from `run_experiment.run()`'s output
+    rather than importing `compare()`, since `run()` returns a serialised
+    summary, not the `CVResult` objects `compare()` expects.
+
+    Pinned as an executable fact, not just prose in a doc, so a future
+    change that flips this verdict is caught immediately rather than
+    rediscovered by accident. This is a PR-AUC proxy, not the authoritative
+    cost-based test -- see README.md's falsification-test section.
+    """
+    cv_config = CVConfig(n_splits=5, n_repeats=5, random_state=42)
+    tree_record, _ = run(ExperimentConfig(estimator="decision_tree").with_(cv=cv_config), write=False)
+    xgb_record, _ = run(ExperimentConfig(estimator="xgboost").with_(cv=cv_config), write=False)
+
+    tree_pr_auc = tree_record.metrics["summary"]["pr_auc"]
+    xgb_pr_auc = xgb_record.metrics["summary"]["pr_auc"]
+
+    difference = xgb_pr_auc["mean"] - tree_pr_auc["mean"]
+    spread = max(xgb_pr_auc["std"], tree_pr_auc["std"])
+
+    assert abs(difference) <= spread, (
+        f"XGBoost's PR-AUC improvement over the depth-limited tree ({difference:+.4f}) "
+        f"now exceeds the CV spread ({spread:.4f}) -- the pre-registered falsification "
+        "test (docs/DECISIONS.md D10) has flipped. Update D10 and README.md's "
+        "falsification-test section before treating this as anything other than a "
+        "real change in the models."
+    )

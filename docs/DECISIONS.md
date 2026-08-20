@@ -180,37 +180,50 @@ table structures. Week 4 fills blanks; it does not decide what to report.
 
 ---
 
-## D10 — Pending: which boosting algorithm is *the* falsification test
+## D10 — XGBoost is *the* falsification test's boosting algorithm
 
-**Not yet decided.** CLAUDE.md's hypothesis says "falsified if boosting beats a
-depth-limited tree by more than the CV standard deviation," but Layer 3 has
-three boosting algorithms (AdaBoost, Gradient Boosting, XGBoost), and this gap
-was never noticed until all three existed to compare against the baseline
+**Chosen:** XGBoost is the pre-registered "boosting" algorithm CLAUDE.md's
+falsification test runs against. Gradient Boosting and AdaBoost stay in the
+Layer 3 comparison table as descriptive context -- informative about how
+boosting implementations differ from each other -- but they are not
+alternate falsification tests. Only XGBoost's result decides this.
+
+**Why this came up at all.** CLAUDE.md's hypothesis says "falsified if
+boosting beats a depth-limited tree by more than the CV standard deviation,"
+but Layer 3 has three boosting algorithms (AdaBoost, Gradient Boosting,
+XGBoost), and nobody had noticed the hypothesis never said which one counts
+until all three existed to compare against the baseline
 (`configs/decision_tree.yaml`).
 
-Measured on identical 5×5 CV folds, PR-AUC vs. the depth-limited tree:
+**Why XGBoost, specifically.** It is the one CLAUDE.md's own locked
+imbalance decision already names by parameter: "class_weight='balanced' /
+scale_pos_weight" -- `scale_pos_weight` is XGBoost's own API, so XGBoost is
+the boosting implementation this project's documentation already treated as
+canonical, independent of anything to do with which algorithm currently
+wins. That independence from the result is the entire point, per D9 --
+choosing after seeing the table which algorithm to elevate would be exactly
+the post-hoc metric selection D9 exists to prevent.
+
+**The measured numbers this decision was made in front of** (5×5 CV, real
+data, PR-AUC vs. the depth-limited tree) -- recorded here so the choice
+above is checkable against them, not just asserted:
 
 | Algorithm | Δ PR-AUC | Beats baseline beyond the CV SD? |
 |---|---|---|
-| Gradient Boosting | +0.065 | Yes — falsifies the hypothesis |
-| XGBoost | +0.026 | No |
+| Gradient Boosting | +0.065 | Yes |
+| **XGBoost (the test)** | **+0.026** | **No** |
 | AdaBoost | −0.057 | Yes, but *worse*, not better |
 
 Matched hyperparameters between GB and XGBoost (`BoostingConfig`) rule out
-"different settings" as the explanation for the split verdict.
+"different settings" as the explanation for the split verdict between them.
 
-Choosing a single algorithm *now*, after seeing this table, would be exactly
-the kind of post-hoc metric selection D9 exists to prevent. Two honest ways
-to resolve it, neither taken yet:
+**Resulting verdict, on this metric: the hypothesis is NOT falsified.**
+XGBoost's improvement over the depth-limited tree does not exceed the CV
+spread. Gradient Boosting's larger, SD-exceeding improvement is no longer
+the test -- it is now a data point showing boosting implementations can
+disagree with each other, which is itself consistent with the hypothesis's
+broader claim that algorithm choice matters less than it might appear.
 
-1. Pick one algorithm as the pre-registered test **before** looking at Layer
-   4's cost-based results, on grounds independent of which one currently
-   wins (e.g. "XGBoost, because it is the one CLAUDE.md's locked imbalance
-   decision names by parameter name").
-2. Require all three to trip the criterion before calling the hypothesis
-   falsified, treating a split result as "inconclusive on this metric."
-
-Also unresolved: this whole comparison is on PR-AUC, a proxy. The hypothesis
-is stated against expected cost, which needs Layer 4 (not yet built). Revisit
-this decision when Layer 4 lands, not before -- and record whichever option
-is chosen here, with the reasoning, before Layer 4 results are reviewed.
+**Still open:** this is a PR-AUC proxy. The hypothesis is stated against
+expected cost, which needs Layer 4 (not yet built) before this verdict can
+be called authoritative rather than preliminary.

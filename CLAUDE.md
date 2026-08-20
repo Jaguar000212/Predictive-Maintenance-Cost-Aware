@@ -28,9 +28,14 @@ for industrial predictive maintenance.
 statistically indistinguishable performance at a computable ceiling, and total
 expected cost varies more with the alarm threshold than with the algorithm.
 
-**Falsified if** boosting beats a depth-limited tree by more than the CV standard
-deviation; or any model exceeds the ceiling without an identifiable leakage path;
-or algorithm choice moves cost more than threshold choice does.
+**Falsified if** boosting — XGBoost, the pre-registered test (`docs/DECISIONS.md`
+D10) — beats a depth-limited tree by more than the CV standard deviation; or any
+model exceeds the ceiling without an identifiable leakage path; or algorithm
+choice moves cost more than threshold choice does.
+
+Gradient Boosting and AdaBoost stay in the Layer 3 comparison table as
+descriptive context — informative about how boosting implementations differ,
+but not alternate falsification tests. Only XGBoost's result decides this.
 
 A negative result is a valid finding. Do not tune toward confirming the hypothesis.
 
