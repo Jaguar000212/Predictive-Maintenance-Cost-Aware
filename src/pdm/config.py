@@ -532,21 +532,26 @@ class MetricConfig:
 
 @dataclass(frozen=True)
 class CostConfig:
-    """Layer 4 cost constants, in currency units.
+    """Layer 4 cost constants, in abstract currency units (AI4I carries no real
+    monetary figures, so this is a ratio decision, not a dollar estimate).
 
-    **Deliberately unset.** The ratio of missed-failure cost to false-alarm cost
-    determines the optimal threshold, decides which recall ceiling is worth
-    targeting, and is what the central hypothesis is measured against. Choosing
-    it after seeing model results is indistinguishable from tuning toward the
-    hypothesis.
+    **Decided — see `docs/DECISIONS.md` D11.** Default ratio is
+    missed_failure : false_alarm : inspection = 10 : 1 : 0.5, a literature-based
+    assertion (unplanned-failure cost commonly cited at 5-10x planned-maintenance
+    cost), chosen in front of Layer 3's PR-AUC results only -- no cost figure had
+    been computed yet when this was fixed, so it could not have been reverse
+    engineered from one.
 
-    `validate()` raises rather than defaulting, so no cost number can be produced
-    before the decision is made and recorded in docs/DECISIONS.md.
+    `validate()` still raises on an explicitly unset or negative value. That
+    guard predates this decision and stays: it is what made "no cost figure
+    before the ratio is chosen and recorded" enforceable while the decision was
+    pending, and it still catches an ablation or override that unsets a field
+    without meaning to.
     """
 
-    missed_failure: float | None = None
-    false_alarm: float | None = None
-    inspection: float | None = None
+    missed_failure: float | None = 10.0
+    false_alarm: float | None = 1.0
+    inspection: float | None = 0.5
     horizon_hours: float = 1000.0
 
     @property

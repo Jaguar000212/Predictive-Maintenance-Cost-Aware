@@ -227,3 +227,52 @@ broader claim that algorithm choice matters less than it might appear.
 **Still open:** this is a PR-AUC proxy. The hypothesis is stated against
 expected cost, which needs Layer 4 (not yet built) before this verdict can
 be called authoritative rather than preliminary.
+
+---
+
+## D11 — Cost ratio: missed failure : false alarm : inspection = 10 : 1 : 0.5
+
+**Chosen:** `missed_failure = 10.0`, `false_alarm = 1.0`, `inspection = 0.5`
+(abstract currency units — AI4I carries no real monetary figures, so this is
+a ratio decision, not a dollar estimate).
+
+**Why now, and why this shape.** `CostConfig` was deliberately left unset
+from the start of the project (see `CLAUDE.md`, "Configuration") because the
+missed-failure : false-alarm ratio decides the optimal alarm threshold,
+decides which recall ceiling (84.66% strict vs. 97.35% extended, D6) is
+worth buying, and is the quantity the central hypothesis is measured
+against. Choosing it after seeing *cost* results would be tuning toward the
+hypothesis. It is chosen here in front of Layer 3's PR-AUC results only —
+no cost figure has been computed yet, so nothing about this ratio could
+have been reverse-engineered from a cost table.
+
+**Why 10:1, not something else.** Industrial predictive-maintenance
+literature commonly places unplanned-failure cost at roughly 5–10× planned
+maintenance cost — unplanned downtime carries emergency labor, lost
+production, and risk of collateral damage that a scheduled stoppage does
+not. 10:1 is the upper end of that commonly cited range, chosen because
+AI4I's failure modes (tool overstrain, power-band failure, heat dissipation
+failure) plausibly cause the kind of abrupt, damage-risking stoppage that
+justifies the higher end rather than the low end.
+
+**Why inspection = 0.5, not 0.** A correct alarm still costs something — the
+machine is stopped and someone checks it — but it is the cheapest outcome in
+the table because it is planned and non-destructive. Setting it below
+`false_alarm` (1.0) encodes that a *correct* stoppage is preferable to an
+*incorrect* one, even though both involve stopping the machine.
+
+**What this is not.** This is an asserted ratio with a literature-based
+justification, not a measured cost from this project's own data — AI4I does
+not carry currency figures. The report's limitations section should state
+this plainly. A sensitivity analysis (does the optimal threshold move a lot
+or a little as this ratio is varied, e.g. 5:1 and 20:1 alongside 10:1) is
+cheap to run once Layer 4 exists and materially strengthens a ratio that is
+asserted rather than measured — recommended before this is treated as final
+in the report, not required to unblock building Layer 4 itself.
+
+**Structural consequence.** `CostConfig`'s dataclass defaults now carry
+these values directly (`src/pdm/config.py`), so every experiment config uses
+this ratio unless a config explicitly overrides it. `validate()` still
+raises on an explicitly unset or negative value — that guard stays, it just
+no longer trips on the default case now that the default is a real decision
+instead of a placeholder.

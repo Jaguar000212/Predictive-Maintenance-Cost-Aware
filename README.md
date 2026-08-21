@@ -127,9 +127,10 @@ configuration behind it. Two carry particular weight:
 - `DeterminismConfig` — which failure modes count as recoverable. Moving TWF
   between groups moves the headline ceiling by 12.7 points, so it is a recorded
   setting rather than a constant.
-- `CostConfig` — ships deliberately **unset**, and raises if a cost is computed
-  before the ratio is chosen and justified. Picking it after seeing model results
-  would be indistinguishable from tuning toward the hypothesis.
+- `CostConfig` — defaults to the decided ratio, missed_failure : false_alarm :
+  inspection = 10 : 1 : 0.5 (see `docs/DECISIONS.md` D11), a literature-based
+  assertion fixed before any cost figure existed, not tuned toward a result.
+  `validate()` still raises on an explicitly unset or negative value.
 
 ## Metrics
 

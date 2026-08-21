@@ -135,18 +135,28 @@ def test_unknown_subset_is_rejected():
 
 
 # ---------------------------------------------------------------------------
-# Cost constants: the pending decision, enforced structurally
+# Cost constants: decided in docs/DECISIONS.md D11, enforced structurally
 # ---------------------------------------------------------------------------
-def test_cost_constants_are_unset_by_default():
-    assert not CostConfig().is_configured
+def test_cost_constants_default_to_the_decided_ratio():
+    """D11: missed_failure : false_alarm : inspection = 10 : 1 : 0.5."""
+    cost = CostConfig()
+    assert cost.is_configured
+    cost.validate()  # must not raise -- the decision is made, not pending
+    assert cost.missed_failure == 10.0
+    assert cost.false_alarm == 1.0
+    assert cost.inspection == 0.5
+    assert cost.ratio == pytest.approx(10.0)
 
 
-def test_computing_a_cost_before_the_decision_raises():
-    """Prevents a cost figure existing before the ratio is justified and recorded."""
+def test_computing_a_cost_before_an_explicit_unset_still_raises():
+    """The guard that made 'no cost before the decision' enforceable while the
+    ratio was pending still exists -- it now only trips if a field is
+    explicitly unset (e.g. by an override or ablation), not by default.
+    """
     with pytest.raises(ValueError, match="pending project decision"):
-        CostConfig().validate()
+        CostConfig(missed_failure=None).validate()
     with pytest.raises(ValueError, match="pending project decision"):
-        _ = CostConfig().ratio
+        _ = CostConfig(false_alarm=None).ratio
 
 
 def test_configured_costs_expose_the_ratio():

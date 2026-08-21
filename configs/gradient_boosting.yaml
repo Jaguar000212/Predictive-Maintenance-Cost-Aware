@@ -28,4 +28,5 @@ metrics:
   beta: 2.0
   report_threshold: 0.5
 
-# Cost constants stay unset -- see dummy.yaml.
+# Cost constants: missed_failure:false_alarm:inspection = 10:1:0.5 (default,
+# docs/DECISIONS.md D11). Override per-config only with a recorded reason.

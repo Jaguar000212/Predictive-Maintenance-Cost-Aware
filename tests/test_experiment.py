@@ -104,7 +104,9 @@ def test_dummy_config_file_loads():
     config = ExperimentConfig.from_yaml(CONFIGS / "dummy.yaml")
     assert config.estimator == "dummy_constant_negative"
     assert config.cv.n_splits == 5 and config.cv.n_repeats == 5
-    assert not config.cost.is_configured  # the pending decision stays pending
+    # D11: missed_failure : false_alarm : inspection = 10 : 1 : 0.5, decided.
+    assert config.cost.is_configured
+    assert config.cost.ratio == pytest.approx(10.0)
 
 
 def test_a_typo_in_a_config_is_rejected_not_ignored(tmp_path):

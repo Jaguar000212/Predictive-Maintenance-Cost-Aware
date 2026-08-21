@@ -52,6 +52,7 @@ A negative result is a valid finding. Do not tune toward confirming the hypothes
 | Gaussian Processes | Rejected. Do not add. |
 | Deep learning, MCMC | Out of scope |
 | C-MAPSS subsets | FD001 only |
+| Cost ratio | missed_failure : false_alarm : inspection = 10 : 1 : 0.5 (`docs/DECISIONS.md` D11) |
 
 Rationale for each is in `docs/DECISIONS.md`.
 
@@ -230,9 +231,11 @@ fixture.
 headline ceiling from 84.66% to 97.35%. It validates that every mode is
 classified exactly once, so a mode cannot silently vanish from the arithmetic.
 
-`CostConfig` ships **deliberately unset** and `validate()` raises. No cost figure
-can be produced before the ratio is chosen, justified, and recorded in
-`docs/DECISIONS.md`.
+`CostConfig` defaults to the decided ratio — missed_failure : false_alarm :
+inspection = 10 : 1 : 0.5 (`docs/DECISIONS.md` D11), a literature-based
+assertion fixed before any cost figure existed. `validate()` still raises on
+an explicitly unset or negative value, so an override can't silently drop a
+field.
 
 Loaders **assert** their output shape and raise `DataValidationError` rather than
 coercing. That is deliberate: a malformed load that raises costs minutes, one that
