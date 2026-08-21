@@ -431,9 +431,46 @@ fine and prints a confident, wrong number, so `cost_model.py` stops at cost
 per row (unit-unambiguous on its own) and leaves the hours conversion as a
 named open decision, not a silent guess.
 
-**Not yet built:** threshold optimisation over real (cross-validated, not
-in-sample) predictions, and the policy table comparing recall ceilings
-(84.66% strict vs. 97.35% extended, D6) under this cost ratio.
+**Threshold optimisation on real (cross-validated) predictions.**
+`cross_validated_cost_curve()` replaces the in-sample check above with the
+honest version: it re-splits the data exactly the way `CrossValidator.run()`
+does (same `cv_config`, so the same fold sequence every other metric in this
+project uses) and sweeps every threshold on each fold's *held-out*
+predictions only, then reports the mean ± SD of cost-per-row across folds —
+the same "never trust one split" rule this project applies to every other
+metric.
+
+Numbers stated before running: the depth-limited tree is heavily regularised
+(`max_depth=4`), so little train/test gap was expected — around 0.08–0.13,
+close to its in-sample 0.0785. XGBoost has more capacity, so a bigger honest
+gap was expected — 0.05–0.10 versus its in-sample 0.0350.
+
+**Measured, 5×5 CV:**
+
+| Estimator | Optimal threshold | Cost per row (mean ± SD across 25 folds) |
+|---|---|---|
+| Constant-negative dummy | 0.01 | 0.339 ± 0.002 |
+| Decision tree (depth-limited) | 0.83 | 0.0826 ± 0.0137 |
+| XGBoost | 0.70 | 0.0817 ± 0.0124 |
+
+The dummy and the tree landed inside their predicted ranges. XGBoost did
+not — it came in at 0.0817, matching the tree almost exactly (a difference
+of 0.0009, an order of magnitude smaller than either model's own 25-fold
+spread) rather than showing the larger honest-CV gap its extra capacity
+predicted. **This is a real finding, not a discrepancy to explain away:**
+on cost per row, honestly cross-validated, XGBoost and the depth-limited
+tree are statistically indistinguishable — a second, independent piece of
+evidence for the falsification test's PR-AUC-based verdict (D10), this time
+at the metric the hypothesis is actually stated against. Also notable: the
+optimal threshold moved from 0.5 (F2's implicit default) to 0.70–0.83 once
+the real 10:1 cost ratio replaced F2's fixed 4:1 stand-in, and each model's
+own fold-to-fold spread (±0.012–0.014) dwarfs the 0.0009 gap between them —
+direct, if still preliminary, support for the hypothesis's other half
+(threshold moves cost more than algorithm choice does).
+
+**Not yet built:** the policy table comparing recall ceilings (84.66% strict
+vs. 97.35% extended, D6) under this cost ratio — the last piece before
+Week 4's freeze.
 
 ## Status
 
@@ -453,16 +490,18 @@ diagrams exist) is satisfied in code.
 
 The falsification test itself now runs (see above): with XGBoost
 pre-registered as *the* boosting algorithm (`docs/DECISIONS.md` D10), the
-hypothesis is **not falsified** on PR-AUC. Still a proxy result pending
-Layer 4's cost-based version.
+hypothesis is **not falsified** on PR-AUC — and now also not falsified on
+honest, cross-validated cost per row, the metric the hypothesis is actually
+stated against (see Layer 4 above): XGBoost and the depth-limited tree land
+within 0.0009 of each other, far inside either model's own fold spread.
 
-The cost ratio is decided (`docs/DECISIONS.md` D11, 10 : 1 : 0.5) and the
-cost-arithmetic core is built and verified against a hand-computed
-expectation (see Layer 4 above). What's left before Week 4's freeze:
-threshold optimisation over real cross-validated predictions, and the
-policy table comparing recall ceilings under this ratio.
+The cost ratio is decided (`docs/DECISIONS.md` D11, 10 : 1 : 0.5), and both
+the cost-arithmetic core and honest threshold optimisation on real
+cross-validated predictions are built and verified (see Layer 4 above).
+What's left before Week 4's freeze: the policy table comparing recall
+ceilings under this ratio.
 
-227 tests cover the config guards, the loader corruption paths (against synthetic
+237 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the
 cross-validation leakage guarantees, the physics formulas, the Weibull MLE
 (including recovery under simulated censoring and agreement with an
@@ -470,9 +509,10 @@ independent oracle), the Layer 2 likelihood/posterior formulas (against hand
 recomputations, including the Laplace covariance and its zero-variance limit),
 the Brier decomposition (against an independent row-level recomputation), the
 Layer 3 calibration findings above and the AdaBoost reweighting bug, the
-Layer 4 cost arithmetic against hand-computed totals (each pinned as a
-real-data or hand-computed regression test, not just observed once), and the
-gate itself.
+Layer 4 cost arithmetic against hand-computed totals, honest threshold
+optimisation against a no-signal leakage-guard floor and a closed-form dummy
+expectation (each pinned as a real-data or hand-computed regression test,
+not just observed once), and the gate itself.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
 Rationale for each decision is in `docs/DECISIONS.md`.

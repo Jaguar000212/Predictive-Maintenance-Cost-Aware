@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
+from sklearn.dummy import DummyClassifier
+from sklearn.tree import DecisionTreeClassifier
 
-from pdm.config import CostConfig
-from pdm.decision.cost_model import cost_curve, cost_per_row, expected_cost, optimal_operating_point
+from pdm.config import CostConfig, CVConfig
+from pdm.decision.cost_model import (
+    cost_curve,
+    cost_per_row,
+    cross_validated_cost_curve,
+    expected_cost,
+    optimal_operating_point,
+)
 
 COST = CostConfig()  # default D11 ratio: 10 / 1 / 0.5
 
@@ -107,3 +116,174 @@ def test_cost_curve_rejects_a_sweep_missing_confusion_counts():
 def test_optimal_operating_point_rejects_a_curve_without_cost():
     with pytest.raises(KeyError, match="cost_per_row"):
         optimal_operating_point(_fake_sweep())
+
+
+# ---------------------------------------------------------------------------
+# cross_validated_cost_curve -- the honest version
+#
+# Fixtures mirror tests/test_cv.py's `noise` and `signal` (same seeds), since
+# this module reuses that one's leakage-guard logic rather than re-deriving
+# it, and its correctness rests on exactly the same "no test-fold row ever
+# reaches a fit" property.
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def noise():
+    """400 rows, 10% positives, features carrying no signal whatsoever."""
+    rng = np.random.default_rng(42)
+    X = pd.DataFrame(rng.normal(size=(400, 5)), columns=[f"f{i}" for i in range(5)])
+    y = (rng.random(400) < 0.10).astype(int)
+    return X, y
+
+
+@pytest.fixture
+def signal():
+    """400 rows where one feature genuinely separates the classes."""
+    rng = np.random.default_rng(7)
+    y = (rng.random(400) < 0.20).astype(int)
+    X = pd.DataFrame(
+        {"informative": y * 2.5 + rng.normal(size=400), "noise": rng.normal(size=400)},
+    )
+    return X, y
+
+
+def _small_cv_config() -> CVConfig:
+    return CVConfig(n_splits=5, n_repeats=2, random_state=0)
+
+
+def test_cv_cost_curve_cannot_beat_the_two_trivial_strategies_on_pure_noise(noise):
+    """Leakage guard, cost-model version of test_cv.py's PR-AUC analogue.
+
+    An unlimited-depth tree memorises noise perfectly in-sample. With no real
+    signal, the best any honestly-scored threshold can do is match whichever
+    trivial strategy the cost ratio favours -- "always fire" (pay false_alarm
+    on every negative) or "never fire" (pay missed_failure on every
+    positive). If the honestly cross-validated optimum beats that floor by
+    much, folds are leaking into each other.
+    """
+    X, y = noise
+    result = cross_validated_cost_curve(
+        lambda: DecisionTreeClassifier(random_state=0), X, y, cost=COST, cv_config=_small_cv_config()
+    )
+    base_rate = y.mean()
+    floor = min(base_rate * COST.missed_failure, (1 - base_rate) * COST.false_alarm)
+    assert result.optimal["cost_per_row_mean"] > floor * 0.8, (
+        "honest CV beat the no-signal trivial-strategy floor by more than fold noise "
+        "should allow -- check for a leakage path before trusting this number"
+    )
+
+
+def test_cv_cost_curve_matches_the_hand_computed_dummy_expectation(signal):
+    """A constant-negative model never fires, at any threshold in the grid
+    (predict_proba is always 0, and the lowest grid point is 0.01 > 0), so
+    cost per row is the same closed-form number as the pure-arithmetic dummy
+    check: base_rate * missed_failure.
+    """
+    X, y = signal
+    result = cross_validated_cost_curve(
+        lambda: DummyClassifier(strategy="constant", constant=0),
+        X,
+        y,
+        cost=COST,
+        cv_config=_small_cv_config(),
+    )
+    base_rate = y.mean()
+    expected = base_rate * COST.missed_failure
+    assert result.optimal["cost_per_row_mean"] == pytest.approx(expected, abs=0.02)
+    # The curve should be flat: a model whose prediction never changes with
+    # the threshold has the same cost at every threshold, within one fold.
+    one_fold = result.fold_curves[(result.fold_curves["fold"] == 0) & (result.fold_curves["repeat"] == 0)]
+    assert one_fold["cost_per_row"].nunique() == 1
+
+
+def test_real_signal_beats_the_dummy_once_scored_honestly(signal):
+    """Complement to the leakage test: real signal must still show up."""
+    X, y = signal
+    dummy = cross_validated_cost_curve(
+        lambda: DummyClassifier(strategy="constant", constant=0),
+        X,
+        y,
+        cost=COST,
+        cv_config=_small_cv_config(),
+    )
+    tree = cross_validated_cost_curve(
+        lambda: DecisionTreeClassifier(random_state=0, max_depth=3),
+        X,
+        y,
+        cost=COST,
+        cv_config=_small_cv_config(),
+    )
+    assert tree.optimal["cost_per_row_mean"] < dummy.optimal["cost_per_row_mean"]
+
+
+def test_fold_count_matches_the_cv_config(noise):
+    X, y = noise
+    cv_config = CVConfig(n_splits=4, n_repeats=3, random_state=0)
+    result = cross_validated_cost_curve(
+        lambda: DummyClassifier(strategy="prior"), X, y, cost=COST, cv_config=cv_config
+    )
+    assert result.n_fits == 12 == cv_config.n_fits
+    assert sorted(result.fold_curves["fold"].unique()) == [0, 1, 2, 3]
+    assert sorted(result.fold_curves["repeat"].unique()) == [0, 1, 2]
+    # Every fold, every threshold in the 99-point default grid.
+    assert len(result.fold_curves) == 12 * 99
+
+
+def test_same_cv_config_gives_the_same_fold_curves(noise):
+    """Comparing models scored on different splits confounds model with split
+    -- the same reason CrossValidator.run() is deterministic given a seed."""
+    X, y = noise
+    a = cross_validated_cost_curve(
+        lambda: DummyClassifier(strategy="prior"), X, y, cost=COST, cv_config=_small_cv_config()
+    )
+    b = cross_validated_cost_curve(
+        lambda: DummyClassifier(strategy="prior"), X, y, cost=COST, cv_config=_small_cv_config()
+    )
+    pd.testing.assert_frame_equal(a.fold_curves, b.fold_curves)
+
+
+def test_a_fresh_estimator_is_built_for_every_fold(noise):
+    X, y = noise
+    built = []
+
+    def factory():
+        estimator = DummyClassifier(strategy="prior")
+        built.append(estimator)
+        return estimator
+
+    result = cross_validated_cost_curve(factory, X, y, cost=COST, cv_config=_small_cv_config())
+    assert len(built) == result.n_fits == 10
+    assert len({id(e) for e in built}) == 10
+
+
+def test_passing_an_instance_instead_of_a_factory_is_rejected(noise):
+    X, y = noise
+    with pytest.raises(TypeError, match="zero-argument callable"):
+        cross_validated_cost_curve(DummyClassifier(strategy="prior"), X, y, cost=COST)
+
+
+def test_non_binary_target_is_rejected(noise):
+    X, _ = noise
+    with pytest.raises(ValueError, match="y must be binary"):
+        cross_validated_cost_curve(
+            lambda: DummyClassifier(strategy="prior"), X, np.arange(400) % 3, cost=COST
+        )
+
+
+def test_unconfigured_cost_is_rejected_before_any_fold_runs(noise):
+    """The 'no cost before the decision' guard must fire before spending time
+    fitting folds, not partway through."""
+    X, y = noise
+    with pytest.raises(ValueError, match="pending project decision"):
+        cross_validated_cost_curve(
+            lambda: DummyClassifier(strategy="prior"), X, y, cost=CostConfig(missed_failure=None)
+        )
+
+
+def test_summary_is_indexed_by_the_full_threshold_grid(noise):
+    X, y = noise
+    result = cross_validated_cost_curve(
+        lambda: DummyClassifier(strategy="prior"), X, y, cost=COST, cv_config=_small_cv_config()
+    )
+    summary = result.summary()
+    assert len(summary) == 99  # MetricConfig's default grid
+    assert {"threshold", "cost_per_row_mean", "cost_per_row_std"} <= set(summary.columns)

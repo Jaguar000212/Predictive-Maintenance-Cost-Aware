@@ -1,10 +1,19 @@
-"""Layer 4: cost model and (soon) threshold optimisation / policy simulation."""
+"""Layer 4: cost model, threshold optimisation, and (soon) policy simulation."""
 
-from .cost_model import cost_curve, cost_per_row, expected_cost, optimal_operating_point
+from .cost_model import (
+    CVCostResult,
+    cost_curve,
+    cost_per_row,
+    cross_validated_cost_curve,
+    expected_cost,
+    optimal_operating_point,
+)
 
 __all__ = [
+    "CVCostResult",
     "cost_curve",
     "cost_per_row",
+    "cross_validated_cost_curve",
     "expected_cost",
     "optimal_operating_point",
 ]
