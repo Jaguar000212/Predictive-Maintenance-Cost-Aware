@@ -400,6 +400,41 @@ different story for some of these models (see the calibration sections
 above — AdaBoost's Brier, for instance, is the worst of any Layer 3 model
 despite a PR-AUC well above the baseline).
 
+## Layer 4 — cost model
+
+`src/pdm/decision/cost_model.py` turns a confusion matrix into a currency
+figure, using the ratio decided in `docs/DECISIONS.md` D11 — missed failure
+: false alarm : inspection = 10 : 1 : 0.5. Every classification decision
+lands in one of four priced buckets (a true negative is free); summing and
+dividing by row count gives **cost per row**, the number comparable across
+both models and thresholds. Feeding `MetricSuite.sweep()`'s per-threshold
+output through `cost_curve()` produces the full curve, and
+`optimal_operating_point()` reads off its minimum — the cost-optimal
+threshold, which is the actual target of CLAUDE.md's central claim (cost
+varies more with threshold than with algorithm).
+
+**Verified against a hand-computed expectation before trusting it on real
+data.** A constant-negative model never fires, so every real failure is a
+missed one: cost per row = base rate × missed_failure = 0.0339 × 10 =
+**0.339**. That is exactly what the code produces. A quick in-sample check
+(not a real evaluation — fit and scored on the same rows, so overfit-
+optimistic) confirms the direction: decision tree ≈0.08, XGBoost ≈0.04 at
+threshold 0.5, both far below the dummy's 0.339, as expected once a model
+starts trading expensive misses for cheap false alarms.
+
+**Deliberately not built yet: "cost per 1000h."** CLAUDE.md's primary-metrics
+table names an hourly rate, but AI4I's 10,000 rows are discrete machining
+processes with no timestamp and no stated duration — there is no justified
+row-to-hour conversion anywhere in this project. Reporting one without an
+explicit, recorded assumption would be exactly the kind of thing that runs
+fine and prints a confident, wrong number, so `cost_model.py` stops at cost
+per row (unit-unambiguous on its own) and leaves the hours conversion as a
+named open decision, not a silent guess.
+
+**Not yet built:** threshold optimisation over real (cross-validated, not
+in-sample) predictions, and the policy table comparing recall ceilings
+(84.66% strict vs. 97.35% extended, D6) under this cost ratio.
+
 ## Status
 
 **Week 1 gate passed.** The constant-negative baseline runs end to end and writes
@@ -419,19 +454,25 @@ diagrams exist) is satisfied in code.
 The falsification test itself now runs (see above): with XGBoost
 pre-registered as *the* boosting algorithm (`docs/DECISIONS.md` D10), the
 hypothesis is **not falsified** on PR-AUC. Still a proxy result pending
-Layer 4's cost model — cost model, threshold optimisation, and the policy
-table are what's left before Week 4's freeze.
+Layer 4's cost-based version.
 
-215 tests cover the config guards, the loader corruption paths (against synthetic
+The cost ratio is decided (`docs/DECISIONS.md` D11, 10 : 1 : 0.5) and the
+cost-arithmetic core is built and verified against a hand-computed
+expectation (see Layer 4 above). What's left before Week 4's freeze:
+threshold optimisation over real cross-validated predictions, and the
+policy table comparing recall ceilings under this ratio.
+
+227 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the
 cross-validation leakage guarantees, the physics formulas, the Weibull MLE
 (including recovery under simulated censoring and agreement with an
 independent oracle), the Layer 2 likelihood/posterior formulas (against hand
 recomputations, including the Laplace covariance and its zero-variance limit),
 the Brier decomposition (against an independent row-level recomputation), the
-Layer 3 calibration findings above and the AdaBoost reweighting bug (each
-pinned as a real-data regression test, not just observed once), and the gate
-itself.
+Layer 3 calibration findings above and the AdaBoost reweighting bug, the
+Layer 4 cost arithmetic against hand-computed totals (each pinned as a
+real-data or hand-computed regression test, not just observed once), and the
+gate itself.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
 Rationale for each decision is in `docs/DECISIONS.md`.
