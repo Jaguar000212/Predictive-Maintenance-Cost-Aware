@@ -493,8 +493,21 @@ false alarms. The saved missed-failure cost (43 × 9.5 = 408.5) is smaller
 than the added false-alarm cost (678 × 1 = 678), so the cost curve's answer
 to D6 is: **84.66%, not 97.35%, is the ceiling worth targeting here.** The
 wear band only becomes worth buying once missed-failure cost exceeds
-roughly 16.3× false-alarm cost — noticeably above D11's 10×, and a concrete
-number for the sensitivity check D11 itself called for.
+roughly 16.267× false-alarm cost — noticeably above D11's 10×.
+
+**Sensitivity check, run rather than left as a caveat.** D11 recommended
+checking whether this verdict depends on the exact ratio. It does:
+
+| Ratio | Strict | Extended | Verdict |
+|---|---|---|---|
+| 5 : 1 : 0.5 | 0.0404 | 0.0888 | Strict cheaper, by more than at 10:1 |
+| **10 : 1 : 0.5 (chosen)** | **0.0664** | **0.0933** | **Strict cheaper** |
+| 20 : 1 : 0.5 | 0.1184 | 0.1023 | **Flips — extended cheaper** |
+
+10:1 sits well below the ~16.3× breakeven, so it isn't a knife-edge choice
+— but a defensible ratio at the other end of the same literature range
+(D11 cites 5–10×, informally up to 20×) would reverse D12's conclusion.
+That range, not just the single 10:1 number, belongs in the report.
 
 Where the real models land: XGBoost and the depth-limited tree's honest CV
 cost (0.0817–0.0826, above) sits *between* the two ceilings, closer to the
@@ -533,7 +546,7 @@ ratio, the 84.66% strict ceiling costs less than the 97.35% extended one,
 not more. **Layer 4 is complete.** What's left before Week 4's freeze is
 report writing, not new code.
 
-251 tests cover the config guards, the loader corruption paths (against synthetic
+252 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the
 cross-validation leakage guarantees, the physics formulas, the Weibull MLE
 (including recovery under simulated censoring and agreement with an

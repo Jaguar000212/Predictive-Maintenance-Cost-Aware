@@ -199,3 +199,51 @@ def test_buying_the_extended_ceiling_costs_more_than_the_strict_one(real_df):
     )
     assert strict == pytest.approx(0.06635)
     assert extended == pytest.approx(0.0933)
+
+
+# ---------------------------------------------------------------------------
+# D11's sensitivity check: is D12's verdict robust to the exact ratio, or
+# does it depend on 10:1 specifically?
+# ---------------------------------------------------------------------------
+def test_d12_verdict_is_not_robust_across_the_plausible_ratio_range(real_df):
+    """D11 flagged this as recommended before treating its ratio as final.
+
+    The oracle counts (287/52/0 strict; 330/9/678 extended) don't change with
+    the ratio, so whether extended beats strict is purely a function of
+    missed_failure (false_alarm and inspection held at D11's 1 / 0.5):
+    extended wins once 43 * (missed_failure - 0.5) > 678, i.e.
+    missed_failure > 678 / 43 + 0.5 ~= 16.267.
+
+    At 5:1 -- the conservative end of the 5-10x literature range D11 cites --
+    strict wins by an even wider margin than at 10:1. At 20:1, on the other
+    side of the breakeven point, the verdict FLIPS: extended becomes
+    cheaper. D12's conclusion ("target 84.66%, not 97.35%") holds at D11's
+    chosen ratio and is not a knife-edge call (10 sits well below the ~16.3
+    breakeven), but it is not true across the whole range CLAUDE.md's own
+    literature citation (5-10x, extended informally up to 20x) would permit
+    -- exactly the caveat a sensitivity check exists to surface.
+    """
+    breakeven = 678 / 43 + 0.5
+    assert breakeven == pytest.approx(16.267, abs=0.001)
+
+    def _verdict(missed_failure: float) -> tuple[float, float]:
+        table = policy_table(
+            real_df,
+            cost=CostConfig(missed_failure=missed_failure, false_alarm=1.0, inspection=0.5),
+            schema=SCHEMA,
+            determinism=DETERMINISM,
+        ).set_index("policy")
+        return (
+            table.loc["strict_physics_ceiling", "cost_per_row"],
+            table.loc["strict_physics_plus_wear_band", "cost_per_row"],
+        )
+
+    strict_5, extended_5 = _verdict(5.0)
+    assert strict_5 < extended_5, "at 5:1 the strict ceiling must still be the cheaper policy"
+
+    strict_20, extended_20 = _verdict(20.0)
+    assert extended_20 < strict_20, (
+        f"at 20:1 the extended ceiling ({extended_20:.4f}) should now be cheaper than strict "
+        f"({strict_20:.4f}) -- if this fails, the breakeven arithmetic above no longer matches "
+        "policy_table()'s actual counts; investigate before trusting either number"
+    )

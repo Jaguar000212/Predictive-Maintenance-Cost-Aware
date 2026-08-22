@@ -265,12 +265,25 @@ alarms per additional failure caught (678 / 43), against a ratio that only
 tolerates paying for a false alarm when it buys back more than 1/9.5 of a
 prevented failure.
 
-**Breakeven, for the report's sensitivity section.** Buying the wear band
-becomes worth it once `missed_failure` exceeds roughly **16.3x**
-`false_alarm` (solving 43 x (m - 0.5) = 678 x 1 for m, with inspection held
-at 0.5) -- noticeably above D11's 10x. This is the kind of check D11 itself
-recommended before treating its ratio as final; here it produces a concrete
-number rather than a vague caveat.
+**Breakeven, confirmed by running the sensitivity check D11 recommended, not
+just predicted from arithmetic.** Buying the wear band becomes worth it once
+`missed_failure` exceeds roughly **16.267x** `false_alarm` (43 x (m - 0.5) =
+678 x 1, inspection held at D11's 0.5). Re-running `policy_table()` at 5:1
+and 20:1 confirms the direction on both sides of that line:
+
+| Ratio (missed:false:inspection) | Strict cost/row | Extended cost/row | Verdict |
+|---|---|---|---|
+| 5 : 1 : 0.5 | 0.0404 | 0.0888 | Strict cheaper (by more than at 10:1) |
+| **10 : 1 : 0.5 (D11, chosen)** | **0.0664** | **0.0933** | **Strict cheaper** |
+| 20 : 1 : 0.5 | 0.1184 | 0.1023 | **Extended cheaper — verdict flips** |
+
+D11's chosen ratio (10x) sits comfortably below the ~16.3x breakeven, so
+this is not a knife-edge call at the ratio actually in use — but the flip
+at 20x, a value CLAUDE.md's own literature citation does not rule out, means
+D12's conclusion depends on which end of the plausible range is picked, not
+just on the number the project happened to choose. Pinned as a permanent
+regression test (`tests/test_policy_sim.py`); state this range explicitly
+in the report rather than only the single 10:1 headline number.
 
 **What this is not.** Both ceiling policies are computed from the AI4I
 mode flags and raw wear column directly -- the strict component is the same
@@ -321,11 +334,19 @@ the table because it is planned and non-destructive. Setting it below
 **What this is not.** This is an asserted ratio with a literature-based
 justification, not a measured cost from this project's own data — AI4I does
 not carry currency figures. The report's limitations section should state
-this plainly. A sensitivity analysis (does the optimal threshold move a lot
-or a little as this ratio is varied, e.g. 5:1 and 20:1 alongside 10:1) is
-cheap to run once Layer 4 exists and materially strengthens a ratio that is
-asserted rather than measured — recommended before this is treated as final
-in the report, not required to unblock building Layer 4 itself.
+this plainly.
+
+**Sensitivity check, run (see D12 for the full result).** At 5:1, D12's
+"target strict, not extended" verdict holds by an even wider margin than at
+10:1. At 20:1, it **flips** — the extended ceiling becomes the cheaper
+policy. The flip point is missed_failure ≈ 16.27× false_alarm (with
+false_alarm and inspection held at D11's 1 and 0.5), comfortably above
+10:1 but inside the range CLAUDE.md's own literature citation (5-10x,
+informally up to 20x) would permit. **10:1 is not a knife-edge choice — it
+sits well below the breakeven — but D12's conclusion is not true across the
+whole range a different, still-defensible ratio choice could have picked.**
+That caveat belongs in the report's limitations section alongside D11's
+ratio itself, not just in this file.
 
 **Structural consequence.** `CostConfig`'s dataclass defaults now carry
 these values directly (`src/pdm/config.py`), so every experiment config uses
