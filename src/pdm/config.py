@@ -247,6 +247,14 @@ class DeterminismConfig:
     semi_deterministic: tuple[str, ...] = ("TWF",)
     stochastic: tuple[str, ...] = ("RNF",)
 
+    # Lower edge of TWF's U[200, 240] min draw. A deployable policy cannot see
+    # which tool's threshold has been reached -- only that a tool has entered
+    # the risk band -- so recovering TWF's failures means flagging every row
+    # at or above this wear, not just the ones that happened to fail. That is
+    # the "fixed precision cost" this project's D6 refers to: most tools
+    # flagged this way will not actually fail. See `decision/policy_sim.py`.
+    wear_band_start_min: float = 200.0
+
     def validate_against(self, mode_flags: tuple[str, ...]) -> None:
         """Every mode must be classified exactly once.
 

@@ -468,9 +468,39 @@ own fold-to-fold spread (±0.012–0.014) dwarfs the 0.0009 gap between them —
 direct, if still preliminary, support for the hypothesis's other half
 (threshold moves cost more than algorithm choice does).
 
-**Not yet built:** the policy table comparing recall ceilings (84.66% strict
-vs. 97.35% extended, D6) under this cost ratio — the last piece before
-Week 4's freeze.
+**The policy table.** D6 left an explicit open question: whether to target
+the 84.66% strict recall ceiling or spend extra false alarms to reach the
+97.35% extended one "depends on C_cm/C_pm... let the cost curve decide."
+`src/pdm/decision/policy_sim.py` answers it. Two of its four rows are
+oracle policies computed directly from AI4I's mode flags and raw
+`tool_wear_min` — ground truth, not a prediction, so they're upper bounds
+on what a real classifier can achieve, not something deployable on their
+own (see the module's docstring caveat) — plus two trivial bookends
+(never/always alarm).
+
+| Policy | Recall | Precision | Cost per row |
+|---|---|---|---|
+| Never alarm | 0% | — | 0.339 |
+| Strict physics (HDF\|PWF\|OSF) | 84.66% | 100% | **0.0664** |
+| + wear band (tool_wear ≥ 200 min) | 97.35% | 32.7% | **0.0933** |
+| Always alarm | 100% | 3.39% | 0.983 |
+
+**Verdict (`docs/DECISIONS.md` D12): at the D11 ratio, buying the extended
+ceiling costs *more*, not less.** Catching TWF's 43 extra failures means
+flagging every tool that enters the wear band, since the exact per-tool
+failure point is never observable — 678 of those flags turn out to be
+false alarms. The saved missed-failure cost (43 × 9.5 = 408.5) is smaller
+than the added false-alarm cost (678 × 1 = 678), so the cost curve's answer
+to D6 is: **84.66%, not 97.35%, is the ceiling worth targeting here.** The
+wear band only becomes worth buying once missed-failure cost exceeds
+roughly 16.3× false-alarm cost — noticeably above D11's 10×, and a concrete
+number for the sensitivity check D11 itself called for.
+
+Where the real models land: XGBoost and the depth-limited tree's honest CV
+cost (0.0817–0.0826, above) sits *between* the two ceilings, closer to the
+strict one — consistent with the models learning something closer to "flag
+high wear when it's actually informative" than "flag the whole band
+indiscriminately."
 
 ## Status
 
@@ -495,13 +525,15 @@ honest, cross-validated cost per row, the metric the hypothesis is actually
 stated against (see Layer 4 above): XGBoost and the depth-limited tree land
 within 0.0009 of each other, far inside either model's own fold spread.
 
-The cost ratio is decided (`docs/DECISIONS.md` D11, 10 : 1 : 0.5), and both
-the cost-arithmetic core and honest threshold optimisation on real
-cross-validated predictions are built and verified (see Layer 4 above).
-What's left before Week 4's freeze: the policy table comparing recall
-ceilings under this ratio.
+The cost ratio is decided (`docs/DECISIONS.md` D11, 10 : 1 : 0.5), and the
+cost-arithmetic core, honest threshold optimisation on real cross-validated
+predictions, and the policy table are all built and verified (see Layer 4
+above). D6's open question is answered (`docs/DECISIONS.md` D12): at this
+ratio, the 84.66% strict ceiling costs less than the 97.35% extended one,
+not more. **Layer 4 is complete.** What's left before Week 4's freeze is
+report writing, not new code.
 
-237 tests cover the config guards, the loader corruption paths (against synthetic
+251 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the
 cross-validation leakage guarantees, the physics formulas, the Weibull MLE
 (including recovery under simulated censoring and agreement with an
@@ -511,8 +543,9 @@ the Brier decomposition (against an independent row-level recomputation), the
 Layer 3 calibration findings above and the AdaBoost reweighting bug, the
 Layer 4 cost arithmetic against hand-computed totals, honest threshold
 optimisation against a no-signal leakage-guard floor and a closed-form dummy
-expectation (each pinned as a real-data or hand-computed regression test,
-not just observed once), and the gate itself.
+expectation, and the policy table against both a hand-built toy frame and
+the real 84.66%/97.35% ceiling counts (each pinned as a real-data or
+hand-computed regression test, not just observed once), and the gate itself.
 
 Working agreement, locked decisions, and verified data facts are in `CLAUDE.md`.
 Rationale for each decision is in `docs/DECISIONS.md`.

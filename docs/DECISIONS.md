@@ -230,6 +230,63 @@ be called authoritative rather than preliminary.
 
 ---
 
+## D12 — The wear-band (extended) ceiling is not worth buying, at 10 : 1 : 0.5
+
+**Finding:** D6 left an explicit open question -- "whether to buy" the
+97.35% extended recall ceiling over the 84.66% strict one "depends on
+C_cm/C_pm... report both ceilings and both policies... and let the cost
+curve decide." Layer 4's `policy_sim.py` now answers it, with the ratio
+D11 fixed: **at 10 : 1 : 0.5, no.** The strict ceiling costs less.
+
+**The numbers** (`oracle_ceiling_counts`, computed directly from AI4I's
+mode flags plus the raw `tool_wear_min` column -- ground truth, not a
+prediction; see the caveat in `policy_sim.py`'s module docstring):
+
+| Policy | Recall | Precision | tp | fp | fn | Cost per row |
+|---|---|---|---|---|---|---|
+| Strict physics (HDF\|PWF\|OSF) | 84.66% | 100% | 287 | 0 | 52 | **0.0664** |
+| + wear band (`tool_wear_min >= 200`) | 97.35% | 32.7% | 330 | 678 | 9 | **0.0933** |
+
+Moving from strict to extended catches 43 more real failures (saving
+43 x (missed_failure - inspection) = 43 x 9.5 = 408.5 in cost) but requires
+flagging every row with 200+ minutes of tool wear to do it -- 678 of those
+rows never actually failed (678 x false_alarm = 678 in added cost). The
+extra false-alarm cost (678) exceeds the avoided-miss saving (408.5), so
+the extended policy costs 0.0933 - 0.0664 = 0.0269 per row **more**, not
+less, than the strict one.
+
+**Why this happens, not just that it does.** TWF's failure threshold is
+drawn per-tool from U[200, 240] min and is never observable, so there is no
+rule that flags only the tools about to fail -- catching one more TWF
+failure means flagging every tool that has merely *entered* the risk band,
+most of which will keep running fine. The 12.7-point recall gap between the
+two ceilings is real, but here it is expensive to buy: roughly 15.8 false
+alarms per additional failure caught (678 / 43), against a ratio that only
+tolerates paying for a false alarm when it buys back more than 1/9.5 of a
+prevented failure.
+
+**Breakeven, for the report's sensitivity section.** Buying the wear band
+becomes worth it once `missed_failure` exceeds roughly **16.3x**
+`false_alarm` (solving 43 x (m - 0.5) = 678 x 1 for m, with inspection held
+at 0.5) -- noticeably above D11's 10x. This is the kind of check D11 itself
+recommended before treating its ratio as final; here it produces a concrete
+number rather than a vague caveat.
+
+**What this is not.** Both ceiling policies are computed from the AI4I
+mode flags and raw wear column directly -- the strict component is the same
+kind of oracle bound `eda.AI4IRecallCeilingAnalysis` already uses for the
+recall-only version of this number (not something a real classifier can
+be guaranteed to reach, only approximate). The wear-band component, by
+contrast, *is* a real, deployable rule (tool wear is observable before any
+failure) -- so this specific comparison is honest about the cost of a
+concrete, buildable policy, even though the strict half of it is an upper
+bound. A trained model's honestly cross-validated cost (0.0817-0.0826,
+`docs/DECISIONS.md` "threshold optimisation" work) sits between the two
+ceilings -- closer to strict -- suggesting the models are implicitly making
+a similar trade rather than crudely flagging the whole wear band.
+
+---
+
 ## D11 — Cost ratio: missed failure : false alarm : inspection = 10 : 1 : 0.5
 
 **Chosen:** `missed_failure = 10.0`, `false_alarm = 1.0`, `inspection = 0.5`
