@@ -307,9 +307,9 @@ No figure or table in the report may come from an unrecorded run.
 | Gate | Criterion |
 |---|---|
 | **Week 1** | ✅ **PASSED.** `run_experiment.py configs/dummy.yaml` runs the constant-negative baseline end to end and writes a results JSON. Measured: recall 0, PR-AUC 0.0339, Brier 0.0339 — all at the base rate, as predicted. Asserted permanently in `tests/test_experiment.py`. |
-| Week 2 | Weibull validated against simulated censoring; reliability diagrams exist |
-| Week 3 | Model comparison table populated with CV mean ± SD |
-| Week 4 | Cost curves and policy table complete. **Code freeze day 24.** |
+| **Week 2** | ✅ **PASSED.** `CensoredWeibullMLE` recovers the true, uncensored-generating β and η within 10% under simulated Type-I censoring (not the biased-short naive fit that ignores censoring), and agrees with `scipy.stats.weibull_min.fit` on the uncensored special case to 4 decimal places. Reliability diagrams (`plot_reliability_diagram`) and the Brier decomposition exist and are verified against independent row-level recomputation. Asserted in `tests/test_censored_weibull.py`, `tests/test_calibration.py`. |
+| **Week 3** | ✅ **PASSED.** All six Layer 3 models (depth-limited tree, Random Forest, AdaBoost, Gradient Boosting, XGBoost, soft voting) are built and compared against the depth-limited tree with CV mean ± SD (5×5 folds) in `README.md`'s falsification-test table. The pre-registered test (XGBoost, D10) does not falsify the hypothesis on PR-AUC. Asserted in `tests/test_trees.py`, `tests/test_experiment.py`. |
+| **Week 4** | ✅ **Cost curves and policy table complete.** Cost model, honest threshold optimisation on real cross-validated predictions, and the policy table (D12) are built and verified — see `docs/DECISIONS.md` D11/D12 and `README.md`'s Layer 4 section. Asserted in `tests/test_cost_model.py`, `tests/test_policy_sim.py`. **Code freeze day 24 is a calendar checkpoint, not a code-completion one — confirm separately whether day 24 has been reached.** |
 
 Harness validation: constant-negative dummy gives recall 0, PR-AUC ≈ 0.0339
 (the base rate). Anything else means the harness is broken, not the model.
