@@ -68,6 +68,27 @@ def main() -> int:
     print()
     print(policy.to_string(index=False))
 
+    # D11's sensitivity check: is D12's strict-vs-extended verdict robust to
+    # the exact ratio, or specific to 10:1? False_alarm/inspection held fixed.
+    print()
+    sensitivity = {}
+    for missed_failure in (5.0, 10.0, 20.0):
+        ratio_cost = CostConfig(missed_failure=missed_failure, false_alarm=1.0, inspection=0.5)
+        ratio_table = policy_table(df, cost=ratio_cost, schema=schema, determinism=determinism).set_index(
+            "policy"
+        )
+        strict = float(ratio_table.loc["strict_physics_ceiling", "cost_per_row"])
+        extended = float(ratio_table.loc["strict_physics_plus_wear_band", "cost_per_row"])
+        sensitivity[f"{missed_failure:.0f}:1:0.5"] = {
+            "strict_cost_per_row": strict,
+            "extended_cost_per_row": extended,
+            "extended_cheaper": extended < strict,
+        }
+        print(
+            f"ratio {missed_failure:.0f}:1:0.5  strict={strict:.4f}  extended={extended:.4f}  "
+            f"-> {'extended cheaper' if extended < strict else 'strict cheaper'}"
+        )
+
     record = RunRecord(
         name="layer4_cost_analysis",
         config={
@@ -79,6 +100,7 @@ def main() -> int:
         metrics={
             "cross_validated_cost_curve": cv_results,
             "policy_table": policy.to_dict(orient="records"),
+            "ratio_sensitivity": sensitivity,
         },
         seeds=[0],
         git=GitState.capture(paths.repo_root),
