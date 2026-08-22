@@ -1,0 +1,133 @@
+{
+  "config": {
+    "cost": {
+      "false_alarm": 1.0,
+      "horizon_hours": 1000.0,
+      "inspection": 0.5,
+      "missed_failure": 10.0
+    },
+    "cv": {
+      "n_repeats": 5,
+      "n_splits": 5,
+      "random_state": 42,
+      "shuffle": true
+    },
+    "determinism": {
+      "deterministic": [
+        "HDF",
+        "PWF",
+        "OSF"
+      ],
+      "semi_deterministic": [
+        "TWF"
+      ],
+      "stochastic": [
+        "RNF"
+      ],
+      "wear_band_start_min": 200.0
+    },
+    "estimators": [
+      "decision_tree",
+      "xgboost"
+    ]
+  },
+  "created_utc": "2026-08-22T18:23:49+00:00",
+  "environment": {
+    "numpy": "2.4.6",
+    "pandas": "2.3.3",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "python": "3.11.15",
+    "scipy": "1.17.1",
+    "sklearn": "1.9.0"
+  },
+  "git": {
+    "branch": "main",
+    "dirty": false,
+    "sha": "6711ae0a8071e22dcb092ecabafbc87f241d8480"
+  },
+  "metrics": {
+    "cross_validated_cost_curve": {
+      "decision_tree": {
+        "cost_per_row_mean": 0.08256999999999999,
+        "cost_per_row_std": 0.013715585720874874,
+        "n_fits": 25,
+        "optimal_threshold": 0.83
+      },
+      "xgboost": {
+        "cost_per_row_mean": 0.08166999999999999,
+        "cost_per_row_std": 0.012437703097169241,
+        "n_fits": 25,
+        "optimal_threshold": 0.7
+      }
+    },
+    "policy_table": [
+      {
+        "cost_per_row": 0.339,
+        "fn": 339,
+        "fp": 0,
+        "n_alarms": 0,
+        "policy": "never_alarm",
+        "precision": 0.0,
+        "recall": 0.0,
+        "tn": 9661,
+        "tp": 0
+      },
+      {
+        "cost_per_row": 0.06635,
+        "fn": 52,
+        "fp": 0,
+        "n_alarms": 287,
+        "policy": "strict_physics_ceiling",
+        "precision": 1.0,
+        "recall": 0.8466076696165191,
+        "tn": 9661,
+        "tp": 287
+      },
+      {
+        "cost_per_row": 0.0933,
+        "fn": 9,
+        "fp": 678,
+        "n_alarms": 1008,
+        "policy": "strict_physics_plus_wear_band",
+        "precision": 0.3273809523809524,
+        "recall": 0.9734513274336283,
+        "tn": 8983,
+        "tp": 330
+      },
+      {
+        "cost_per_row": 0.98305,
+        "fn": 0,
+        "fp": 9661,
+        "n_alarms": 10000,
+        "policy": "always_alarm",
+        "precision": 0.0339,
+        "recall": 1.0,
+        "tn": 0,
+        "tp": 339
+      }
+    ],
+    "ratio_sensitivity": {
+      "10:1:0.5": {
+        "extended_cheaper": false,
+        "extended_cost_per_row": 0.0933,
+        "strict_cost_per_row": 0.06635
+      },
+      "20:1:0.5": {
+        "extended_cheaper": true,
+        "extended_cost_per_row": 0.1023,
+        "strict_cost_per_row": 0.11835
+      },
+      "5:1:0.5": {
+        "extended_cheaper": false,
+        "extended_cost_per_row": 0.0888,
+        "strict_cost_per_row": 0.04035
+      }
+    }
+  },
+  "name": "layer4_cost_analysis",
+  "notes": "Layer 4: honest CV cost-optimal thresholds for decision_tree/xgboost (cost_model.cross_validated_cost_curve) and the oracle policy table (policy_sim.policy_table). See docs/DECISIONS.md D11/D12.",
+  "reproducible": true,
+  "seeds": [
+    0
+  ]
+}
