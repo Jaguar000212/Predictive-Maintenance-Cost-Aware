@@ -46,7 +46,7 @@ A negative result is a valid finding. Do not tune toward confirming the hypothes
 | Imbalance | `class_weight='balanced'` / `scale_pos_weight`. **Not** SMOTE. |
 | SMOTE | Ablation only, judged on Brier score and reliability curves. |
 | Accuracy | **Banned as a metric.** Constant-negative scores 96.6%. |
-| Primary metrics | PR-AUC, recall, F2, Brier score, cost per 1000h |
+| Primary metrics | PR-AUC, recall, F2, Brier score, cost per classification decision (not per 1000h — see D11) |
 | Leakage | Drop TWF/HDF/PWF/OSF/RNF flags from the feature matrix |
 | CV | All scaling, resampling, calibration, tuning **inside** each fold |
 | Gaussian Processes | Rejected. Do not add. |
@@ -129,7 +129,7 @@ unverifiable. Do not shortcut it.
 | 1 | Censored Weibull MLE (hand-written likelihood, `scipy.optimize`) | Age-based maintenance interval |
 | 2 | Gaussian NB + Bayesian logistic regression | Calibrated probabilities + uncertainty |
 | 3 | Decision tree, Random Forest, AdaBoost, GB, XGBoost, soft Voting | Discriminative predictions |
-| 4 | Cost model + threshold optimisation | Cost per 1000h per policy |
+| 4 | Cost model + threshold optimisation | Cost per classification decision, per policy |
 
 Layer 1 uses C-MAPSS. Layers 2–3 use AI4I. They converge only at Layer 4.
 No model or parameter transfers between datasets.

@@ -24,8 +24,9 @@ deviate from it for a discriminative classifier.
 later.** Reweighting toward a balanced prior does exactly what it does to any
 model: it pushes leaf probabilities away from the true ~3.4% base rate, the
 same mechanism CLAUDE.md rejects SMOTE for. On the real data this tree scores
-PR-AUC 0.84 (it ranks well) but Brier 0.0352 -- WORSE than the trivial
-constant-negative baseline's 0.0339. That is not a bug: `predict_proba()`
+PR-AUC 0.8332 (it ranks well) but Brier 0.0373 -- WORSE than the trivial
+constant-negative baseline's 0.0339 (5x5 CV; `results/decision_tree__*.json`
+is the recorded run this number traces to). That is not a bug: `predict_proba()`
 here answers "how does this compare to other rows" reliably, but is not a
 trustworthy probability at the dataset's real prevalence. Threshold-swept
 metrics (`MetricSuite.sweep`) are unaffected, since they count confusion

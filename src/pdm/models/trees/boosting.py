@@ -26,8 +26,9 @@ file:
   1.0 (degenerate), silently wasting 197 of 200 rounds. `BalancedAdaBoost`
   instead injects the balanced weighting exactly once, as the ensemble's
   *initial* sample distribution, and lets AdaBoost's own per-round reweighting
-  take over unmodified from there -- verified to bring PR-AUC back to 0.76,
-  in line with a plain (no reweighting at all) stump. The base estimator
+  take over unmodified from there -- verified to bring PR-AUC back to 0.7763
+  (5x5 CV; `results/adaboost__*.json`), in line with a plain (no reweighting
+  at all) stump. The base estimator
   itself is a plain, unweighted one-level stump, kept this shallow because
   AdaBoost's classic formulation is many weak learners, not `TreeConfig`'s
   own baseline depth.

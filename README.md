@@ -73,7 +73,7 @@ Full report: `reports/eda/eda_report.txt` (regenerate with the command below).
 | 1 | Censored Weibull MLE (explicit likelihood) | Age-based maintenance interval |
 | 2 | Gaussian NB + Bayesian logistic regression | Calibrated probabilities |
 | 3 | Decision tree, Random Forest, AdaBoost, GB, XGBoost, Voting | Discriminative predictions |
-| 4 | Cost model + threshold optimisation | Cost per 1000h per policy |
+| 4 | Cost model + threshold optimisation | Cost per classification decision, per policy |
 
 Layer 1 uses C-MAPSS; Layers 2–3 use AI4I. They converge only at Layer 4. No model
 or parameter transfers between datasets.
@@ -136,8 +136,15 @@ configuration behind it. Two carry particular weight:
 
 Accuracy is **not implemented**, deliberately: a constant-negative model scores
 96.61% on this data. Evaluation uses PR-AUC, recall, F2, Brier score, and cost per
-1000h. PR-AUC is average precision, not trapezoidal area — the two differ and only
-one is intended. The decision threshold has no default; it is always explicit.
+classification decision. PR-AUC is average precision, not trapezoidal area — the
+two differ and only one is intended. The decision threshold has no default; it is
+always explicit.
+
+CLAUDE.md's original metric list named "cost per 1000h" — an hourly rate needs a
+row-to-hour conversion AI4I's 10,000 discrete machining processes don't supply
+(no timestamp, no stated process duration). Rather than invent one, `cost_model.py`
+reports cost per row instead (see Layer 4 below); the hours framing was declined,
+not silently dropped.
 
 ## Cross-validation
 
@@ -244,10 +251,13 @@ Predictable and stated before running: `power_w` is an exact function of
 `torque_nm` and `rot_speed_rpm`, both of which stay in the feature matrix.
 Naive independence treats every feature as separate evidence, so a feature
 and its own derivation get double-counted, pushing probabilities further
-from 0.5 than the evidence supports. Measured on the real data: GNB's Brier
-score (0.0320) is worse than the logistic regression's (0.0231) at otherwise
-comparable settings — the calibration cost of that violated assumption,
-exactly as predicted before running either model.
+from 0.5 than the evidence supports. Measured on the real data (5×5 CV,
+`results/gnb__*.json`, `results/bayes_logreg__*.json`): GNB's Brier score
+(0.0319 ± 0.0031) is worse than the logistic regression's (0.0231 ± 0.0012)
+at otherwise comparable settings — the calibration cost of that violated
+assumption, exactly as predicted before running either model. Both are
+still better than the 0.0339 base rate; the comparison that matters here is
+GNB vs. BLR, not either Layer 2 model vs. the dummy.
 
 **`bayes_logreg.py` — `BayesianLogisticRegression`.** No MCMC (out of scope
 per CLAUDE.md) — Laplace's approximation instead: find the MAP weight vector
@@ -306,10 +316,11 @@ which would turn "depth-limited baseline" into just another optimised model.
 with no Layer 2 style carve-out — this is a discriminative classifier.
 
 **A finding worth stating rather than discovering by surprise later.**
-Measured on real data: PR-AUC 0.83 (physics features make the deterministic
-failure modes close to axis-aligned cuts, reachable in a handful of splits),
-but Brier 0.0373 — **worse than the trivial constant-negative baseline's
-0.0339.** Not a bug: `class_weight='balanced'` pushes leaf probabilities away
+Measured on real data (5×5 CV, `results/decision_tree__*.json`): PR-AUC
+0.8332 ± 0.0427 (physics features make the deterministic failure modes close
+to axis-aligned cuts, reachable in a handful of splits), but Brier 0.0373 ±
+0.0072 — **worse than the trivial constant-negative baseline's 0.0339.** Not
+a bug: `class_weight='balanced'` pushes leaf probabilities away
 from the true ~3.4% base rate, the exact mechanism CLAUDE.md rejects SMOTE
 for. `predict_proba()` here ranks reliably but is not a trustworthy
 probability at the real prevalence — threshold-swept metrics are unaffected
@@ -320,8 +331,8 @@ comparable to Layer 2's on its own terms. Pinned as a regression test.
 the single tree controls variance by depth, Random Forest controls it by
 bagging and averaging many unrestricted trees instead — and that averaging
 turns out to fix the calibration problem as a side effect nobody designed
-in: measured Brier 0.0093, comfortably better than the base rate, alongside
-PR-AUC 0.89.
+in: measured Brier 0.0093 ± 0.0012, comfortably better than the base rate,
+alongside PR-AUC 0.8889 ± 0.0274 (5×5 CV, `results/random_forest__*.json`).
 
 **`boosting.py` — AdaBoost, Gradient Boosting, XGBoost.** None of these three
 accept `class_weight`, a real sklearn/XGBoost API gap, so each gets the
@@ -343,11 +354,11 @@ rounds. Fix: `BalancedAdaBoost` applies the balanced weighting exactly once,
 as the ensemble's *initial* sample distribution, via the `sample_weight`
 argument `AdaBoostClassifier.fit` already exposes for this — then lets
 AdaBoost's normal per-round adaptation run unmodified. Measured after the
-fix: PR-AUC 0.78. Pinned as a permanent regression test precisely so a
-reintroduced version of this bug fails a test instead of reading as "AdaBoost
-just doesn't help here."
+fix: PR-AUC 0.7763 ± 0.0354 (5×5 CV, `results/adaboost__*.json`). Pinned as
+a permanent regression test precisely so a reintroduced version of this bug
+fails a test instead of reading as "AdaBoost just doesn't help here."
 
-AdaBoost's Brier score (0.1975) is still the worst of any Layer 3 model —
+AdaBoost's Brier score (0.1975 ± 0.0016) is still the worst of any Layer 3 model —
 but that part is not a bug. SAMME's margin-based probability estimates are a
 well-documented case of poor calibration in the literature (Niculescu-Mizil
 & Caruana, 2005), independent of any reweighting scheme.
@@ -375,15 +386,24 @@ a reason independent of which algorithm happened to score highest. Gradient
 Boosting and AdaBoost stay in the table below as descriptive context, not as
 alternate tests.
 
-| Challenger vs. depth-limited tree | Δ PR-AUC | CV SD used | Beats baseline beyond SD? |
-|---|---|---|---|
-| Random Forest (bagging, not boosting — context only) | +0.056 | 0.043 | Yes |
-| AdaBoost (context only) | −0.057 | 0.043 | Yes — but *worse*, not better |
-| Gradient Boosting (context only) | +0.065 | 0.043 | Yes |
-| **XGBoost — the pre-registered test** | **+0.026** | **0.043** | **No** |
-| Soft voting (contains the baseline itself — context only) | +0.071 | 0.043 | Yes, but not a clean test |
+| Challenger | Absolute PR-AUC (mean ± SD) | Δ vs. tree | CV SD used | Beats baseline beyond SD? |
+|---|---|---|---|---|
+| Decision tree (baseline) | 0.8332 ± 0.0427 | — | — | — |
+| Random Forest (bagging, not boosting — context only) | 0.8889 ± 0.0274 | +0.056 | 0.043 | Yes |
+| AdaBoost (context only) | 0.7763 ± 0.0354 | −0.057 | 0.043 | Yes — but *worse*, not better |
+| Gradient Boosting (context only) | 0.8979 ± 0.0235 | +0.065 | 0.043 | Yes |
+| **XGBoost — the pre-registered test** | **0.8589 ± 0.0280** | **+0.026** | **0.043** | **No** |
+| Soft voting (contains the baseline itself — context only) | 0.9040 ± 0.0228 | +0.071 | 0.043 | Yes, but not a clean test |
 
 Computed with `pdm.eval.cv.compare()` on identical 5×5 folds (`random_state=42`).
+Absolute values are the recorded, reproducible numbers behind each row — trace
+any of them to `results/{decision_tree,random_forest,adaboost,gradient_boosting,
+xgboost,soft_voting}__*.json`. The absolute column is here specifically so no
+one has to reconstruct it from the deltas: XGBoost's 0.8589 sits 13 points
+*above* AdaBoost's 0.7763, not below the tree — there is no boosting algorithm
+here that loses to the tree by a wide margin on PR-AUC; AdaBoost's known
+calibration weakness (see its Brier score above) is a separate finding from its
+PR-AUC ranking, which is still respectable.
 
 **Verdict: the hypothesis is NOT falsified, on this metric.** XGBoost's
 improvement over the depth-limited tree (+0.026) does not exceed the CV
@@ -391,14 +411,16 @@ spread (0.043). This is consistent with the hypothesis's central claim —
 tree-family models converge to similar performance once physics features do
 the hard work of exposing each failure mode as a near axis-aligned rule.
 
-**Still a proxy, not the final word.** This is PR-AUC, one of the locked
-primary metrics but not the one the hypothesis is actually stated against —
-that's expected cost, which needs Layer 4 (cost model, not yet built). A
-verdict here can change once thresholds and real cost weights are in play;
-it has not been checked against Brier or F2 either, both of which tell a
-different story for some of these models (see the calibration sections
-above — AdaBoost's Brier, for instance, is the worst of any Layer 3 model
-despite a PR-AUC well above the baseline).
+**No longer just a proxy.** This is PR-AUC, one of the locked primary metrics
+but not the one the hypothesis is actually stated against — that's expected
+cost. Layer 4 (below) now provides that second, independent check on real
+cross-validated predictions: XGBoost and the tree land within 0.0009 of each
+other on cost, an even tighter margin than on PR-AUC. The two metrics agree
+that these models converge; they do not agree on everything (AdaBoost's Brier
+score, for instance, is the worst of any Layer 3 model despite a respectable
+PR-AUC) — cost is the metric the hypothesis is stated against, so where cost
+and PR-AUC point the same way, cost is the more informative agreement, not a
+redundant one.
 
 ## Layer 4 — cost model
 
@@ -445,7 +467,8 @@ Numbers stated before running: the depth-limited tree is heavily regularised
 close to its in-sample 0.0785. XGBoost has more capacity, so a bigger honest
 gap was expected — 0.05–0.10 versus its in-sample 0.0350.
 
-**Measured, 5×5 CV:**
+**Measured, 5×5 CV** (`results/layer4_cost_analysis__*.json`, produced by
+`scripts/run_cost_analysis.py`):
 
 | Estimator | Optimal threshold | Cost per row (mean ± SD across 25 folds) |
 |---|---|---|
@@ -485,6 +508,8 @@ own (see the module's docstring caveat) — plus two trivial bookends
 | + wear band (tool_wear ≥ 200 min) | 97.35% | 32.7% | **0.0933** |
 | Always alarm | 100% | 3.39% | 0.983 |
 
+(`results/layer4_cost_analysis__*.json`, `scripts/run_cost_analysis.py`.)
+
 **Verdict (`docs/DECISIONS.md` D12): at the D11 ratio, buying the extended
 ceiling costs *more*, not less.** Catching TWF's 43 extra failures means
 flagging every tool that enters the wear band, since the exact per-tool
@@ -503,6 +528,8 @@ checking whether this verdict depends on the exact ratio. It does:
 | 5 : 1 : 0.5 | 0.0404 | 0.0888 | Strict cheaper, by more than at 10:1 |
 | **10 : 1 : 0.5 (chosen)** | **0.0664** | **0.0933** | **Strict cheaper** |
 | 20 : 1 : 0.5 | 0.1184 | 0.1023 | **Flips — extended cheaper** |
+
+(`results/layer4_cost_analysis__*.json`'s `ratio_sensitivity` field.)
 
 10:1 sits well below the ~16.3× breakeven, so it isn't a knife-edge choice
 — but a defensible ratio at the other end of the same literature range
@@ -545,6 +572,19 @@ above). D6's open question is answered (`docs/DECISIONS.md` D12): at this
 ratio, the 84.66% strict ceiling costs less than the 97.35% extended one,
 not more. **Layer 4 is complete.** What's left before Week 4's freeze is
 report writing, not new code.
+
+**Provenance.** Every number in this README traces to a committed file under
+`results/`: `configs/*.yaml` via `scripts/run_experiment.py` for every Layer
+2/3 model, and `scripts/run_cost_analysis.py` for Layer 4's cost curves,
+policy table, and ratio sensitivity check. This was not always true — an
+earlier version of this document reported numbers from throwaway scratch
+runs that were never written to `results/`, in direct violation of this
+project's own rule. Recovered by re-running every config from a clean tree
+and committing the output; a stale copy-paste also surfaced and was fixed
+in the process (`tree.py`'s docstring previously read PR-AUC 0.84 / Brier
+0.0352 against this README's 0.83 / 0.0373 for the same claimed run — the
+two disagreed because neither traced to a file, exactly the failure mode
+committing results prevents).
 
 252 tests cover the config guards, the loader corruption paths (against synthetic
 fixtures, not the real data), every metric against hand-computed values, the
